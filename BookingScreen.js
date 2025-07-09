@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { doc, getDoc, collection, addDoc, query, onSnapshot } from 'firebase/firestore';
+import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { doc, getDoc, collection, addDoc, query, onSnapshot, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 
-export default function BookingScreen({ route }) {
+export default function BookingScreen({ route, navigation }) {
   const { customerId } = route.params || {};
   const [customer, setCustomer] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -14,15 +14,21 @@ export default function BookingScreen({ route }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCustomerList, setShowCustomerList] = useState(false);
   const [cylinders, setCylinders] = useState(1);
+  const [cylinderType, setCylinderType] = useState('14.2kg');
   const [dscNumber, setDscNumber] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('Pending');
   const [amount, setAmount] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(new Date());
   const [serviceType, setServiceType] = useState('No');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [emptyCylinderReceived, setEmptyCylinderReceived] = useState(false);
 
-  // Price per cylinder (you can adjust this value as needed)
-  const PRICE_PER_CYLINDER = 1150;
+  // Price per cylinder type
+  const CYLINDER_PRICES = {
+    '14.2kg': 1150,
+    '5kg': 450,
+    '19kg': 1350
+  };
 
   // Service fees
   const SERVICE_FEES = {
@@ -65,14 +71,14 @@ export default function BookingScreen({ route }) {
   // Auto-calculate amount when payment status is "Paid"
   useEffect(() => {
     if (paymentStatus === 'Paid') {
-      const cylinderCost = cylinders * PRICE_PER_CYLINDER;
+      const cylinderCost = cylinders * CYLINDER_PRICES[cylinderType];
       const serviceFee = SERVICE_FEES[serviceType] || 0;
       const totalAmount = cylinderCost + serviceFee;
       setAmount(totalAmount.toString());
     } else if (paymentStatus === 'Pending') {
       setAmount('');
     }
-  }, [paymentStatus, cylinders, serviceType]);
+  }, [paymentStatus, cylinders, serviceType, cylinderType]);
 
   // Fetch customer details
   useEffect(() => {
@@ -81,7 +87,14 @@ export default function BookingScreen({ route }) {
       if (customerIdToFetch) {
         const docRef = doc(db, "customers", customerIdToFetch);
         const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) setCustomer(docSnap.data());
+        if (docSnap.exists()) {
+          const customerData = docSnap.data();
+          setCustomer(customerData);
+          // Set cylinder type to customer's registered type
+          if (customerData.cylinderType) {
+            setCylinderType(customerData.cylinderType);
+          }
+        }
       }
     };
     fetchCustomer();
@@ -92,6 +105,29 @@ export default function BookingScreen({ route }) {
     setCustomer(customer);
     setSearchQuery(customer.name);
     setShowCustomerList(false);
+    // Set cylinder type to customer's registered type
+    if (customer.cylinderType) {
+      setCylinderType(customer.cylinderType);
+    }
+  };
+
+  // Function to clear the form
+  const clearForm = () => {
+    if (!customerId) {
+      // Only clear customer selection if not passed from navigation
+      setSelectedCustomerId('');
+      setCustomer(null);
+      setSearchQuery('');
+      setShowCustomerList(false);
+    }
+    setCylinders(1);
+    setCylinderType('14.2kg');
+    setDscNumber('');
+    setPaymentStatus('Pending');
+    setAmount('');
+    setDeliveryDate(new Date());
+    setServiceType('No');
+    setEmptyCylinderReceived(false);
   };
 
   const handleServiceTypeSelection = (selectedService) => {
@@ -121,23 +157,112 @@ export default function BookingScreen({ route }) {
       alert("DSC number must be exactly 4 digits!");
       return;
     }
+
+    // Validate cylinder count against registered cylinders
+    const currentCustomer = customer || customers.find(c => c.id === customerIdToBook);
+    if (currentCustomer) {
+      const registeredCylinders = currentCustomer.cylinders || 1;
+      if (cylinders > registeredCylinders) {
+        alert(`Cannot book ${cylinders} cylinders. Customer is registered for only ${registeredCylinders} cylinder${registeredCylinders > 1 ? 's' : ''}. Please update customer registration first.`);
+        return;
+      }
+      
+      // Validate cylinder type matches registered type
+      const registeredType = currentCustomer.cylinderType || '14.2kg';
+      if (cylinderType !== registeredType) {
+        alert(`Cannot book ${cylinderType} cylinders. Customer is registered for ${registeredType} cylinders. Please update customer registration first or select the correct cylinder type.`);
+        return;
+      }
+    }
+
+    // Validate delivery date is not in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDeliveryDate = new Date(deliveryDate);
+    selectedDeliveryDate.setHours(0, 0, 0, 0);
+    
+    if (selectedDeliveryDate < today) {
+      alert("Delivery date cannot be in the past!");
+      return;
+    }
     
     try {
       await addDoc(collection(db, "bookings"), {
         customerId: customerIdToBook,
         cylinders,
+        cylinderType,
         dscNumber: dscNumber,
         payment: { status: paymentStatus, amount },
         deliveryDate,
         serviceType,
         status: "Booked",
+        emptyCylinderReceived: (serviceType === 'Drop' || serviceType === 'Pickup + Drop') ? emptyCylinderReceived : false,
         createdAt: new Date(),
       });
+
+      // Update inventory if empty cylinder was received during booking
+      if ((serviceType === 'Drop' || serviceType === 'Pickup + Drop') && emptyCylinderReceived) {
+        await updateInventory(cylinderType, 'addEmpty', cylinders);
+      }
+
       alert("Booking confirmed!");
-      // Reset DSC number for next booking
-      setDscNumber('');
+      
+      // Clear the form
+      clearForm();
+      
+      // Navigate back to dashboard
+      if (navigation) {
+        navigation.navigate('Dashboard');
+      }
     } catch (error) {
       alert("Error: " + error.message);
+    }
+  };
+
+  // Inventory update functions
+  const updateInventory = async (cylinderType, action, quantity = 1) => {
+    try {
+      if (action === 'addEmpty') {
+        // Add empty cylinders to inventory (create multiple documents)
+        const addPromises = [];
+        for (let i = 0; i < quantity; i++) {
+          addPromises.push(addDoc(collection(db, "cylinders"), {
+            type: cylinderType,
+            status: "EMPTY",
+            lastUpdated: new Date(),
+          }));
+        }
+        await Promise.all(addPromises);
+        console.log(`Successfully added ${quantity} empty ${cylinderType} cylinders to inventory`);
+      } else if (action === 'removeFull') {
+        // Get all full cylinders of this type at once
+        const fullCylindersQuery = query(
+          collection(db, "cylinders"), 
+          where("status", "==", "FULL"),
+          where("type", "==", cylinderType)
+        );
+        const snapshot = await getDocs(fullCylindersQuery);
+        
+        if (snapshot.size >= quantity) {
+          // Delete the required number of cylinders
+          const deletePromises = [];
+          for (let i = 0; i < quantity && i < snapshot.docs.length; i++) {
+            deletePromises.push(deleteDoc(doc(db, "cylinders", snapshot.docs[i].id)));
+          }
+          await Promise.all(deletePromises);
+          console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
+        } else {
+          console.warn(`Only ${snapshot.size} full ${cylinderType} cylinders available, but ${quantity} needed`);
+          // Delete what we have available
+          const deletePromises = snapshot.docs.map(docSnapshot => 
+            deleteDoc(doc(db, "cylinders", docSnapshot.id))
+          );
+          await Promise.all(deletePromises);
+        }
+      }
+    } catch (error) {
+      console.error("Error updating inventory:", error);
+      // Don't throw error to avoid breaking the booking process
     }
   };
 
@@ -146,6 +271,48 @@ export default function BookingScreen({ route }) {
       <Text style={styles.title}>
         {customerId ? `Book Cylinder for ${customer?.name || 'Loading...'}` : 'Book Cylinder'}
       </Text>
+
+      {/* Display customer details when pre-selected */}
+      {customerId && customer && (
+        <View style={styles.customerInfoCard}>
+          <Text style={styles.customerInfoTitle}>📋 Customer Details</Text>
+          <View style={styles.customerInfoRow}>
+            <Text style={styles.customerInfoLabel}>Name:</Text>
+            <Text style={styles.customerInfoValue}>{customer.name}</Text>
+          </View>
+          <View style={styles.customerInfoRow}>
+            <Text style={styles.customerInfoLabel}>Phone:</Text>
+            <Text style={styles.customerInfoValue}>{customer.phone}</Text>
+          </View>
+          {customer.address && (
+            <View style={styles.customerInfoRow}>
+              <Text style={styles.customerInfoLabel}>Address:</Text>
+              <Text style={styles.customerInfoValue}>{customer.address}</Text>
+            </View>
+          )}
+          {customer.bookId && (
+            <View style={styles.customerInfoRow}>
+              <Text style={styles.customerInfoLabel}>Book ID:</Text>
+              <Text style={styles.customerInfoValue}>{customer.bookId}</Text>
+            </View>
+          )}
+          {customer.category && (
+            <View style={styles.customerInfoRow}>
+              <Text style={styles.customerInfoLabel}>Category:</Text>
+              <Text style={styles.customerInfoValue}>{customer.category}</Text>
+            </View>
+          )}
+          <View style={styles.customerInfoRow}>
+            <Text style={styles.customerInfoLabel}>Cylinders:</Text>
+            <Text style={styles.customerInfoValue}>{customer.cylinders || 1} × {customer.cylinderType || '14.2kg'}</Text>
+          </View>
+          {customer.subsidy && (
+            <View style={styles.subsidyIndicator}>
+              <Text style={styles.subsidyText}>💰 Subsidy Applicable</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {!customerId && (
         <View style={styles.customerSearchContainer}>
@@ -183,14 +350,58 @@ export default function BookingScreen({ route }) {
         </View>
       )}
 
-      <Text style={styles.label}>Number of Cylinders:</Text>
-      <TextInput
-        placeholder="Number of Cylinders"
-        value={String(cylinders)}
-        onChangeText={(text) => setCylinders(Number(text))}
-        keyboardType="numeric"
-        style={styles.input}
-      />
+      <Text style={styles.label}>
+        Cylinder Type:
+        {customer && (
+          <Text style={styles.cylinderLimit}> (Registered: {customer.cylinderType || '14.2kg'})</Text>
+        )}
+      </Text>
+      <View style={styles.pickerContainer}>
+        <Picker
+          selectedValue={cylinderType}
+          onValueChange={setCylinderType}
+          style={styles.picker}
+        >
+          <Picker.Item label="14.2kg" value="14.2kg" />
+          <Picker.Item label="5kg" value="5kg" />
+          <Picker.Item label="19kg" value="19kg" />
+        </Picker>
+      </View>
+
+      <Text style={styles.label}>
+        Number of Cylinders:
+        {customer && (
+          <Text style={styles.cylinderLimit}> (Max: {customer.cylinders || 1})</Text>
+        )}
+      </Text>
+      <View style={styles.counterContainer}>
+        <TouchableOpacity 
+          style={[styles.counterButton, cylinders <= 1 && styles.disabledButton]}
+          onPress={() => setCylinders(Math.max(1, cylinders - 1))}
+          disabled={cylinders <= 1}
+        >
+          <Text style={[styles.counterButtonText, cylinders <= 1 && styles.disabledButtonText]}>−</Text>
+        </TouchableOpacity>
+        <View style={styles.counterDisplay}>
+          <Text style={styles.counterValue}>{cylinders}</Text>
+        </View>
+        <TouchableOpacity 
+          style={[
+            styles.counterButton, 
+            (cylinders >= (customer?.cylinders || 10)) && styles.disabledButton
+          ]}
+          onPress={() => {
+            const maxCylinders = customer?.cylinders || 10;
+            setCylinders(Math.min(maxCylinders, cylinders + 1));
+          }}
+          disabled={cylinders >= (customer?.cylinders || 10)}
+        >
+          <Text style={[
+            styles.counterButtonText, 
+            (cylinders >= (customer?.cylinders || 10)) && styles.disabledButtonText
+          ]}>+</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.label}>DSC Number (4 digits):</Text>
       <TextInput
@@ -229,7 +440,7 @@ export default function BookingScreen({ route }) {
             style={[styles.input, styles.readOnlyInput]}
           />
           <Text style={styles.calculationInfo}>
-            Calculation: {cylinders} cylinder(s) × ₹{PRICE_PER_CYLINDER} + ₹{SERVICE_FEES[serviceType]} ({serviceType} fee) = ₹{amount}
+            Calculation: {cylinders} × {cylinderType} (₹{CYLINDER_PRICES[cylinderType]} each) + ₹{SERVICE_FEES[serviceType]} ({serviceType} fee) = ₹{amount}
           </Text>
         </View>
       )}
@@ -245,7 +456,7 @@ export default function BookingScreen({ route }) {
             style={styles.input}
           />
           <Text style={styles.calculationInfo}>
-            Total Amount: ₹{cylinders * PRICE_PER_CYLINDER + SERVICE_FEES[serviceType]} ({cylinders} cylinders + {serviceType} fee)
+            Total Amount: ₹{cylinders * CYLINDER_PRICES[cylinderType] + SERVICE_FEES[serviceType]} ({cylinders} × {cylinderType} + {serviceType} fee)
           </Text>
         </View>
       )}
@@ -261,9 +472,24 @@ export default function BookingScreen({ route }) {
         <DateTimePicker
           value={deliveryDate}
           mode="date"
+          minimumDate={new Date()} // Prevent selection of past dates
           onChange={(event, date) => {
             setShowDatePicker(false);
-            if (date) setDeliveryDate(date);
+            if (date) {
+              // Additional validation to ensure selected date is not in the past
+              const today = new Date();
+              today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+              const selectedDate = new Date(date);
+              selectedDate.setHours(0, 0, 0, 0);
+              
+              if (selectedDate >= today) {
+                setDeliveryDate(date);
+              } else {
+                // If somehow a past date is selected, default to today
+                setDeliveryDate(new Date());
+                alert("Delivery date cannot be in the past. Setting to today's date.");
+              }
+            }
           }}
         />
       )}
@@ -302,12 +528,25 @@ export default function BookingScreen({ route }) {
         </TouchableOpacity>
       </View>
 
+      {/* Empty Cylinder Checkbox - Only show for Drop services */}
+      {(serviceType === 'Drop' || serviceType === 'Pickup + Drop') && (
+        <View style={styles.checkboxContainer}>
+          <Text style={styles.checkboxLabel}>Empty cylinder received:</Text>
+          <Switch
+            value={emptyCylinderReceived}
+            onValueChange={setEmptyCylinderReceived}
+            trackColor={{ false: '#767577', true: '#81b0ff' }}
+            thumbColor={emptyCylinderReceived ? '#007AFF' : '#f4f3f4'}
+          />
+        </View>
+      )}
+
       {/* Compact Pricing Summary - Before Booking Confirmation */}
       <View style={styles.finalPricingSummary}>
         <Text style={styles.finalPricingTitle}>📋 Order Summary</Text>
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>{cylinders} Cylinder{cylinders > 1 ? 's' : ''}</Text>
-          <Text style={styles.summaryValue}>₹{cylinders * PRICE_PER_CYLINDER}</Text>
+          <Text style={styles.summaryLabel}>{cylinders} × {cylinderType} (₹{CYLINDER_PRICES[cylinderType]} each)</Text>
+          <Text style={styles.summaryValue}>₹{cylinders * CYLINDER_PRICES[cylinderType]}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>
@@ -322,7 +561,7 @@ export default function BookingScreen({ route }) {
         </View>
         <View style={styles.totalSummaryRow}>
           <Text style={styles.totalSummaryLabel}>Total Amount</Text>
-          <Text style={styles.totalSummaryValue}>₹{cylinders * PRICE_PER_CYLINDER + (SERVICE_FEES[serviceType] || 0)}</Text>
+          <Text style={styles.totalSummaryValue}>₹{cylinders * CYLINDER_PRICES[cylinderType] + (SERVICE_FEES[serviceType] || 0)}</Text>
         </View>
       </View>
 
@@ -347,6 +586,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
   input: { borderWidth: 1, borderColor: '#ccc', padding: 10, marginBottom: 10 },
   label: { marginBottom: 5, fontWeight: 'bold' },
+  cylinderLimit: { fontSize: 12, color: '#666', fontWeight: 'normal' },
   serviceOptions: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   serviceButton: { padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 5 },
   selectedService: { backgroundColor: '#e3f2fd', borderColor: '#2196f3' },
@@ -465,5 +705,132 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#1976d2',
     fontWeight: 'bold',
+  },
+  
+  // New styles for cylinder type picker and counter
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    marginBottom: 15,
+  },
+  picker: {
+    height: 50,
+  },
+  counterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  counterButton: {
+    backgroundColor: '#007bff',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  counterButtonText: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  counterDisplay: {
+    backgroundColor: 'white',
+    minWidth: 80,
+    height: 50,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#007bff',
+  },
+  counterValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#007bff',
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+  },
+  disabledButtonText: {
+    color: '#999',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  // Customer info card styles
+  customerInfoCard: {
+    backgroundColor: '#f8f9fa',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007bff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  customerInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  customerInfoRow: {
+    flexDirection: 'row',
+    marginBottom: 5,
+  },
+  customerInfoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    width: 80,
+  },
+  customerInfoValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  subsidyIndicator: {
+    backgroundColor: '#d4edda',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  subsidyText: {
+    color: '#155724',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
 });

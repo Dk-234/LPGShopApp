@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Animated } from 'react-native';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, deleteDoc, addDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Picker } from '@react-native-picker/picker';
 
@@ -10,7 +10,11 @@ export default function BookingsListScreen({ route }) {
   const [filter, setFilter] = useState('All'); // All/Pending/Delivered
   
   // Pricing constants (should match BookingScreen)
-  const PRICE_PER_CYLINDER = 1150;
+  const CYLINDER_PRICES = {
+    '14.2kg': 1150,
+    '5kg': 450,
+    '19kg': 1350
+  };
   const SERVICE_FEES = {
     'Pickup': 50,
     'Drop': 50,
@@ -76,7 +80,6 @@ export default function BookingsListScreen({ route }) {
               };
             }
           } catch (error) {
-            console.error("Error fetching customer:", error);
             return {
               ...booking,
               customerName: "Error Loading",
@@ -87,16 +90,59 @@ export default function BookingsListScreen({ route }) {
         })
       );
       
-      // Apply payment filter
+      // Apply filter-specific logic
       let filteredBookings = bookingsWithCustomerData;
+      
+      // Apply payment filter
       if (paymentFilter !== 'All') {
-        filteredBookings = bookingsWithCustomerData.filter(booking => {
+        filteredBookings = filteredBookings.filter(booking => {
           const paymentStatus = booking.payment?.status || 'Pending';
           return paymentStatus === paymentFilter;
         });
       }
       
-      setBookingsWithCustomers(filteredBookings);
+      // Apply sorting only when viewing 'All' bookings
+      let finalBookings = filteredBookings;
+      
+      if (filter === 'All') {
+        // Sort bookings: Active orders first, then completed orders
+        // Separate active and completed orders first
+        const activeOrders = filteredBookings.filter(booking => booking.status !== 'Delivered');
+        const completedOrders = filteredBookings.filter(booking => booking.status === 'Delivered');
+        
+        // Sort active orders by delivery date (earliest first)
+        activeOrders.sort((a, b) => {
+          const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
+          const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
+          return aDate - bDate;
+        });
+        
+        // Sort completed orders by completion time (most recent first)
+        completedOrders.sort((a, b) => {
+          const aUpdated = a.updatedAt?.toDate ? a.updatedAt.toDate() : new Date(a.updatedAt || a.createdAt || 0);
+          const bUpdated = b.updatedAt?.toDate ? b.updatedAt.toDate() : new Date(b.updatedAt || b.createdAt || 0);
+          return bUpdated - aUpdated;
+        });
+        
+        // Combine: active orders first, then completed orders
+        finalBookings = [...activeOrders, ...completedOrders];
+      } else if (filter === 'In Transit') {
+        // For In Transit, sort by delivery date (earliest first) to prioritize urgent deliveries
+        finalBookings = filteredBookings.sort((a, b) => {
+          const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
+          const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
+          return aDate - bDate;
+        });
+      } else {
+        // For specific filters (Booked/Delivered), just sort by delivery date
+        finalBookings = filteredBookings.sort((a, b) => {
+          const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
+          const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
+          return aDate - bDate;
+        });
+      }
+      
+      setBookingsWithCustomers(finalBookings);
       
       // Check for expired bookings to auto-delete
       checkAndDeleteExpiredBookings(filteredBookings);
@@ -117,8 +163,6 @@ export default function BookingsListScreen({ route }) {
         const updatedTime = booking.updatedAt.toDate ? booking.updatedAt.toDate() : new Date(booking.updatedAt);
         const hoursDifference = (now - updatedTime) / (1000 * 60 * 60); // Convert to hours
         
-        console.log(`Booking ${booking.id}: ${hoursDifference.toFixed(2)} hours since completion`);
-        
         if (hoursDifference >= 20) {
           expiredBookings.push(booking);
         }
@@ -127,25 +171,20 @@ export default function BookingsListScreen({ route }) {
 
     // Delete expired bookings
     if (expiredBookings.length > 0) {
-      console.log(`🗑️ Deleting ${expiredBookings.length} expired bookings...`);
-      
       for (const booking of expiredBookings) {
         try {
           await deleteDoc(doc(db, "bookings", booking.id));
-          console.log(`✅ Deleted expired booking: ${booking.id}`);
         } catch (error) {
           console.error(`❌ Error deleting booking ${booking.id}:`, error);
         }
       }
-    } else {
-      console.log(`ℹ️ No expired bookings found. Checked ${bookings.length} bookings.`);
     }
   };
 
   // Enhanced auto-delete checker that runs periodically
   useEffect(() => {
     const autoDeleteInterval = setInterval(async () => {
-      console.log('⏰ Running scheduled auto-delete check...');
+
       if (bookings.length > 0) {
         await checkAndDeleteExpiredBookings(bookings);
       }
@@ -204,7 +243,6 @@ export default function BookingsListScreen({ route }) {
               };
             }
           } catch (error) {
-            console.error("Error fetching customer:", error);
             return {
               ...booking,
               customerName: "Error Loading",
@@ -304,7 +342,7 @@ export default function BookingsListScreen({ route }) {
         if (paymentStatus === 'Partial') {
           return paymentAmount;
         } else if (paymentStatus === 'Paid') {
-          const cylinderCost = selectedBooking.cylinders * PRICE_PER_CYLINDER;
+          const cylinderCost = calculateCylinderCost(selectedBooking);
           const serviceFee = SERVICE_FEES[selectedBooking.serviceType] || 0;
           return (cylinderCost + serviceFee).toString();
         } else {
@@ -323,6 +361,11 @@ export default function BookingsListScreen({ route }) {
       };
       
       await updateDoc(bookingRef, updateData);
+      
+      // Update inventory when delivery status changes to "Delivered"
+      if (deliveryStatus === 'Delivered' && selectedBooking.status !== 'Delivered') {
+        await updateInventoryOnDelivery(selectedBooking);
+      }
       
       // Update customer payment history if payment was made OR if updating delivery status for already paid orders
       if (paymentStatus === 'Paid' || paymentStatus === 'Partial') {
@@ -381,7 +424,7 @@ export default function BookingsListScreen({ route }) {
           if (paymentStatus === 'Partial') {
             return amount;
           } else if (paymentStatus === 'Paid') {
-            const cylinderCost = selectedBooking.cylinders * PRICE_PER_CYLINDER;
+            const cylinderCost = calculateCylinderCost(selectedBooking);
             const serviceFee = SERVICE_FEES[selectedBooking.serviceType] || 0;
             return (cylinderCost + serviceFee).toString();
           } else {
@@ -408,7 +451,7 @@ export default function BookingsListScreen({ route }) {
             if (transaction.amount === 'FULL' && transaction.paymentStatus === 'Paid' && transaction.bookingId) {
               // Try to get booking details for calculation
               if (transaction.bookingId === selectedBooking.id) {
-                const cylinderCost = selectedBooking.cylinders * PRICE_PER_CYLINDER;
+                const cylinderCost = calculateCylinderCost(selectedBooking);
                 const serviceFee = SERVICE_FEES[selectedBooking.serviceType] || 0;
                 return {
                   ...transaction,
@@ -433,8 +476,6 @@ export default function BookingsListScreen({ route }) {
             status: paymentStatus // Update current payment status
           }
         });
-        
-        console.log(`Updated payment history for customer ${customerId} with status: ${transactionStatus}`);
       }
     } catch (error) {
       console.error("Error updating customer payment history:", error);
@@ -467,7 +508,7 @@ export default function BookingsListScreen({ route }) {
             // Calculate actual amount if it's currently "FULL" or if payment is "Paid"
             let updatedAmount = transaction.amount;
             if (transaction.paymentStatus === 'Paid' && (transaction.amount === 'FULL' || !transaction.amount)) {
-              const cylinderCost = selectedBooking.cylinders * PRICE_PER_CYLINDER;
+              const cylinderCost = calculateCylinderCost(selectedBooking);
               const serviceFee = SERVICE_FEES[selectedBooking.serviceType] || 0;
               updatedAmount = (cylinderCost + serviceFee).toString();
             }
@@ -486,8 +527,6 @@ export default function BookingsListScreen({ route }) {
         await updateDoc(customerRef, {
           paymentHistory: updatedHistory
         });
-        
-        console.log(`Updated existing payment record for booking ${bookingId} with delivery status: ${newDeliveryStatus}`);
       }
     } catch (error) {
       console.error("Error updating existing payment record:", error);
@@ -510,7 +549,7 @@ export default function BookingsListScreen({ route }) {
         if (hasFullAmounts && bookingDetails) {
           const updatedHistory = currentHistory.map(transaction => {
             if (transaction.amount === 'FULL' && transaction.paymentStatus === 'Paid') {
-              const cylinderCost = bookingDetails.cylinders * PRICE_PER_CYLINDER;
+              const cylinderCost = calculateCylinderCost(bookingDetails);
               const serviceFee = SERVICE_FEES[bookingDetails.serviceType] || 0;
               return {
                 ...transaction,
@@ -531,6 +570,49 @@ export default function BookingsListScreen({ route }) {
     } catch (error) {
       console.error("Error fixing FULL amounts in payment history:", error);
     }
+  };
+
+  // Inventory update function for delivery completion
+  const updateInventoryOnDelivery = async (booking) => {
+    try {
+      const cylinderType = booking.cylinderType || '14.2kg';
+      const quantity = booking.cylinders || 1;
+      
+      // Get all full cylinders of this type at once
+      const fullCylindersQuery = query(
+        collection(db, "cylinders"), 
+        where("status", "==", "FULL"),
+        where("type", "==", cylinderType)
+      );
+      const snapshot = await getDocs(fullCylindersQuery);
+      
+      if (snapshot.size >= quantity) {
+        // Delete the required number of cylinders
+        const deletePromises = [];
+        for (let i = 0; i < quantity && i < snapshot.docs.length; i++) {
+          deletePromises.push(deleteDoc(doc(db, "cylinders", snapshot.docs[i].id)));
+        }
+        await Promise.all(deletePromises);
+        console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
+      } else {
+        console.warn(`Only ${snapshot.size} full ${cylinderType} cylinders available, but ${quantity} needed for delivery`);
+        // Delete what we have available
+        const deletePromises = snapshot.docs.map(docSnapshot => 
+          deleteDoc(doc(db, "cylinders", docSnapshot.id))
+        );
+        await Promise.all(deletePromises);
+      }
+    } catch (error) {
+      console.error("Error updating inventory on delivery:", error);
+      // Don't throw error to avoid breaking the delivery update process
+    }
+  };
+
+  // Helper function to calculate price based on cylinder type
+  const calculateCylinderCost = (booking) => {
+    const cylinderType = booking.cylinderType || '14.2kg'; // Default to 14.2kg for legacy bookings
+    const pricePerCylinder = CYLINDER_PRICES[cylinderType] || CYLINDER_PRICES['14.2kg'];
+    return booking.cylinders * pricePerCylinder;
   };
 
   // Helper function to format time remaining for auto-delete
@@ -580,7 +662,9 @@ export default function BookingsListScreen({ route }) {
       <Text style={styles.customerPhone}>Phone: {item.customerPhone}</Text>
       <Text style={styles.bookingDetails}>Book ID: {item.customerBookId || 'N/A'}</Text>
       <Text style={styles.bookingDetails}>DSC: {item.dscNumber || 'N/A'}</Text>
-      <Text style={styles.bookingDetails}>Cylinders: {item.cylinders}</Text>
+      <Text style={styles.bookingDetails}>
+        Cylinders: {item.cylinders} × {item.cylinderType || '14.2kg'}
+      </Text>
       <Text style={styles.bookingDetails}>
         Delivery: {item.deliveryDate?.toDate ? 
           item.deliveryDate.toDate().toDateString() : 
@@ -598,7 +682,20 @@ export default function BookingsListScreen({ route }) {
         {item.payment.status === 'Paid' && item.payment.amount && 
           ` (₹${item.payment.amount})`}
       </Text>
-      <Text style={styles.bookingStatus}>Status: {item.status}</Text>
+      
+      {/* Delivery Status with visual indicator */}
+      <View style={styles.statusContainer}>
+        <View style={[
+          styles.statusIndicator,
+          item.status === 'Delivered' ? styles.completedIndicator : styles.activeIndicator
+        ]} />
+        <Text style={[
+          styles.bookingStatus,
+          item.status === 'Delivered' ? styles.completedStatus : styles.activeStatus
+        ]}>
+          {item.status === 'Delivered' ? '✅ Completed' : `🔄 ${item.status}`}
+        </Text>
+      </View>
       
       {/* Auto-delete timer for completed bookings */}
       {showTimer && (
@@ -740,7 +837,7 @@ export default function BookingsListScreen({ route }) {
     <View style={styles.container}>
       <Text style={styles.filterLabel}>Delivery Status:</Text>
       <View style={styles.filterRow}>
-        {['All', 'Booked', 'Delivered'].map((f) => (
+        {['All', 'Booked', 'In Transit', 'Delivered'].map((f) => (
           <TouchableOpacity
             key={f}
             style={[styles.filterButton, filter === f && styles.activeFilter]}
@@ -754,7 +851,19 @@ export default function BookingsListScreen({ route }) {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </View>      
+      {/* Sorting information */}
+      {filter === 'All' && bookingsWithCustomers.length > 0 && (
+        <View style={styles.sortingInfo}>
+          <Text style={styles.sortingText}>📋 Active orders shown first, then completed orders</Text>
+        </View>
+      )}
+      {filter === 'In Transit' && bookingsWithCustomers.length > 0 && (
+        <View style={styles.sortingInfo}>
+          <Text style={styles.sortingText}>🚚 Sorted by delivery date - earliest deliveries first</Text>
+        </View>
+      )}
+
       <FlatList
         data={bookingsWithCustomers}
         renderItem={renderItem}
@@ -1050,5 +1159,46 @@ const styles = StyleSheet.create({
   expiringSoonCard: {
     borderLeftWidth: 4,
     borderLeftColor: '#ffc107',
+  },
+  // Status indicator styles
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  statusIndicator: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  activeIndicator: {
+    backgroundColor: '#007AFF',
+  },
+  completedIndicator: {
+    backgroundColor: '#34C759',
+  },
+  activeStatus: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  completedStatus: {
+    color: '#34C759',
+    fontWeight: '600',
+  },
+  // Sorting info styles
+  sortingInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 10,
+    borderRadius: 6,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007AFF',
+  },
+  sortingText: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });

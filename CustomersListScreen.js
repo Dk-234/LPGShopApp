@@ -83,7 +83,7 @@ export default function CustomersListScreen({ navigation, route }) {
       <Text>Phone: {item.phone}</Text>
       {item.bookId && <Text>Book ID: {item.bookId}</Text>}
       <Text>Category: {item.category || 'Not Set'}</Text>
-      <Text>Cylinders: {item.cylinders || 0}</Text>
+      <Text>Cylinders: {item.cylinders || 0} × {item.cylinderType || '14.2kg'}</Text>
       <Text style={styles.paymentDate}>
         Last Payment: {item.payment?.lastPaymentDate ? 
           new Date(item.payment.lastPaymentDate.seconds ? 
@@ -102,7 +102,7 @@ export default function CustomersListScreen({ navigation, route }) {
         style={styles.bookButton}
         onPress={(e) => {
           e.stopPropagation();
-          navigation.navigate('Booking', { customerId: item.id });
+          navigation.navigate('BookingScreen', { customerId: item.id });
         }}
       >
         <Text style={styles.bookText}>Book Cylinder</Text>
@@ -167,7 +167,7 @@ export default function CustomersListScreen({ navigation, route }) {
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Cylinders:</Text>
-                  <Text style={styles.detailValue}>{selectedCustomer.cylinders || 0}</Text>
+                  <Text style={styles.detailValue}>{selectedCustomer.cylinders || 0} × {selectedCustomer.cylinderType || '14.2kg'}</Text>
                 </View>
                 {selectedCustomer.address && (
                   <View style={styles.detailRow}>
@@ -285,7 +285,7 @@ export default function CustomersListScreen({ navigation, route }) {
                   style={styles.bookLargeButton}
                   onPress={() => {
                     setModalVisible(false);
-                    navigation.navigate('Booking', { customerId: selectedCustomer.id });
+                    navigation.navigate('BookingScreen', { customerId: selectedCustomer.id });
                   }}
                 >
                   <Text style={styles.bookLargeButtonText}>📋 Book Cylinder</Text>

@@ -9,6 +9,7 @@ import ExportScreen from './ExportScreen';
 import DashboardScreen from './DashboardScreen';
 import BookingScreen from './BookingScreen';
 import BookingsListScreen from './BookingsListScreen';
+import InventoryScreen from './InventoryScreen';
 
 const Stack = createStackNavigator();
 const db = getFirestore(app);
@@ -23,6 +24,7 @@ function AddCustomerScreen({ navigation }) {
   const [subsidy, setSubsidy] = useState(false);
   const [address, setAddress] = useState('');
   const [cylinders, setCylinders] = useState(1);
+  const [cylinderType, setCylinderType] = useState('14.2kg');
   const [customers, setCustomers] = useState([]);
 
   const windowHeight = Dimensions.get('window').height;
@@ -73,6 +75,7 @@ function AddCustomerScreen({ navigation }) {
         subsidy: subsidy,
         address: address,
         cylinders: cylinders,
+        cylinderType: cylinderType,
         payment: {
           status: '',
           amount: 0,
@@ -86,6 +89,7 @@ function AddCustomerScreen({ navigation }) {
       setBookId('');
       setAddress('');
       setCylinders(1);
+      setCylinderType('14.2kg');
       setGender('Male');
       setCategory('Domestic');
       setSubsidy(false);
@@ -173,6 +177,19 @@ function AddCustomerScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.label}>Cylinder Type:</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={cylinderType}
+            onValueChange={setCylinderType}
+            style={styles.picker}
+          >
+            <Picker.Item label="14.2kg" value="14.2kg" />
+            <Picker.Item label="5kg" value="5kg" />
+            <Picker.Item label="19kg" value="19kg" />
+          </Picker>
+        </View>
+
         <Button title="Save Customer" onPress={handleSubmit} />
       </ScrollView>
     </View>
@@ -190,6 +207,7 @@ function EditCustomerScreen({ route, navigation }) {
   const [subsidy, setSubsidy] = useState(customer.subsidy || false);
   const [address, setAddress] = useState(customer.address || '');
   const [cylinders, setCylinders] = useState(customer.cylinders || 1);
+  const [cylinderType, setCylinderType] = useState(customer.cylinderType || '14.2kg');
 
   const handleUpdate = async () => {
     if (!name.trim() || !phone.trim()) {
@@ -207,6 +225,7 @@ function EditCustomerScreen({ route, navigation }) {
         subsidy: subsidy,
         address: address,
         cylinders: cylinders,
+        cylinderType: cylinderType,
         updatedAt: new Date(),
       });
       alert("Customer updated successfully!");
@@ -279,6 +298,19 @@ function EditCustomerScreen({ route, navigation }) {
           >
             <Text style={styles.counterButtonText}>+</Text>
           </TouchableOpacity>
+        </View>
+        
+        <Text style={styles.label}>Cylinder Type:</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={cylinderType}
+            onValueChange={setCylinderType}
+            style={styles.picker}
+          >
+            <Picker.Item label="14.2kg" value="14.2kg" />
+            <Picker.Item label="5kg" value="5kg" />
+            <Picker.Item label="19kg" value="19kg" />
+          </Picker>
         </View>
         
         <Button title="Update Customer" onPress={handleUpdate} color="#28a745" />
@@ -670,7 +702,7 @@ function CustomersListScreen({ navigation, route }) {
                     style={styles.bookLargeButton}
                     onPress={() => {
                       setModalVisible(false);
-                      navigation.navigate('Booking', { customerId: selectedCustomer.id });
+                      navigation.navigate('BookingScreen', { customerId: selectedCustomer.id });
                     }}
                   >
                     <Text style={styles.bookLargeButtonText}>📋 Book Cylinder</Text>
@@ -692,7 +724,29 @@ export default function App() {
         <Stack.Screen 
           name="Dashboard" 
           component={DashboardScreen} 
-          options={{ title: 'LPG Map' }}
+          options={({ navigation }) => ({
+            title: 'LPG Map',
+            headerRight: () => (
+              <TouchableOpacity 
+                onPress={() => navigation.navigate('Inventory')}
+                style={{
+                  marginRight: 15,
+                  backgroundColor: '#007AFF',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                }}
+              >
+                <Text style={{
+                  color: 'white',
+                  fontSize: 14,
+                  fontWeight: '600',
+                }}>
+                  📦 Inventory
+                </Text>
+              </TouchableOpacity>
+            ),
+          })}
         />
         <Stack.Screen 
           name="AddCustomer" 
@@ -723,6 +777,11 @@ export default function App() {
           name="BookingsList" 
           component={BookingsListScreen}
           options={{ title: 'Bookings List' }}
+        />
+        <Stack.Screen 
+          name="Inventory" 
+          component={InventoryScreen}
+          options={{ title: 'Inventory Management' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
@@ -841,6 +900,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    marginBottom: 15,
+  },
+  picker: {
+    height: 50,
   },
   filterBanner: {
     backgroundColor: '#fff3cd',

@@ -28,7 +28,7 @@ export default function ExportScreen() {
   const exportToCSV = () => {
     try {
       // Generate CSV content manually
-      const headers = ['Name', 'Phone', 'Address', 'Cylinders', 'Payment Status', 'Subsidy'];
+      const headers = ['Name', 'Phone', 'Address', 'Cylinders', 'Cylinder Type', 'Payment Status', 'Subsidy', 'Total Transactions', 'Last Payment Date', 'Last Payment Amount'];
       
       const csvContent = [
         headers.join(','),
@@ -37,8 +37,17 @@ export default function ExportScreen() {
           `"${customer.phone || ''}"`,
           `"${customer.address || ''}"`,
           customer.cylinders || 0,
+          `"${customer.cylinderType || '14.2kg'}"`,
           `"${customer.payment?.status || 'Unknown'}"`,
-          customer.subsidy ? 'Yes' : 'No'
+          customer.subsidy ? 'Yes' : 'No',
+          customer.paymentHistory ? customer.paymentHistory.length : 0,
+          customer.payment?.lastPaymentDate ? 
+            `"${new Date(customer.payment.lastPaymentDate.seconds ? 
+              customer.payment.lastPaymentDate.toDate() : 
+              customer.payment.lastPaymentDate
+            ).toLocaleDateString()}"` : 'Never',
+          customer.paymentHistory && customer.paymentHistory.length > 0 ? 
+            customer.paymentHistory[customer.paymentHistory.length - 1].amount || 'N/A' : 'N/A'
         ].join(','))
       ].join('\n');
 
@@ -64,7 +73,7 @@ export default function ExportScreen() {
 
   const copyToClipboard = () => {
     try {
-      const headers = ['Name', 'Phone', 'Address', 'Cylinders', 'Payment Status', 'Subsidy'];
+      const headers = ['Name', 'Phone', 'Address', 'Cylinders', 'Cylinder Type', 'Payment Status', 'Subsidy', 'Total Transactions', 'Last Payment Date', 'Last Payment Amount'];
       
       const csvContent = [
         headers.join('\t'),
@@ -73,8 +82,17 @@ export default function ExportScreen() {
           customer.phone || '',
           customer.address || '',
           customer.cylinders || 0,
+          customer.cylinderType || '14.2kg',
           customer.payment?.status || 'Unknown',
-          customer.subsidy ? 'Yes' : 'No'
+          customer.subsidy ? 'Yes' : 'No',
+          customer.paymentHistory ? customer.paymentHistory.length : 0,
+          customer.payment?.lastPaymentDate ? 
+            new Date(customer.payment.lastPaymentDate.seconds ? 
+              customer.payment.lastPaymentDate.toDate() : 
+              customer.payment.lastPaymentDate
+            ).toLocaleDateString() : 'Never',
+          customer.paymentHistory && customer.paymentHistory.length > 0 ? 
+            customer.paymentHistory[customer.paymentHistory.length - 1].amount || 'N/A' : 'N/A'
         ].join('\t'))
       ].join('\n');
 
@@ -95,6 +113,31 @@ export default function ExportScreen() {
 
   const shareIndividualCustomer = (customer) => {
     try {
+      const paymentHistory = customer.paymentHistory || [];
+      const recentTransactions = paymentHistory
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 5); // Get last 5 transactions
+
+      let transactionDetails = '';
+      if (recentTransactions.length > 0) {
+        transactionDetails = '\n\n📊 Recent Transactions:\n' + 
+          recentTransactions.map((transaction, index) => {
+            const date = new Date(transaction.date.seconds ? 
+              transaction.date.toDate() : 
+              transaction.date
+            ).toLocaleDateString();
+            const status = transaction.status || 
+              (transaction.paymentStatus === 'Paid' && transaction.deliveryStatus === 'Delivered' ? 'Completed' :
+               transaction.paymentStatus === 'Paid' ? 'Paid - Pending Delivery' :
+               transaction.paymentStatus === 'Partial' ? 'Partial Payment' : 'Pending');
+            return `${index + 1}. ${date} - ₹${transaction.amount || 'N/A'} (${status})`;
+          }).join('\n');
+        
+        if (paymentHistory.length > 5) {
+          transactionDetails += `\n... and ${paymentHistory.length - 5} more transactions`;
+        }
+      }
+
       const customerData = `
 Customer Details:
 ━━━━━━━━━━━━━━━━━━━━━
@@ -102,13 +145,19 @@ Customer Details:
 👤 Name: ${customer.name || 'N/A'}
 📞 Phone: ${customer.phone || 'N/A'}
 🏠 Address: ${customer.address || 'N/A'}
-🛢️ Cylinders: ${customer.cylinders || 0}
+🛢️ Cylinders: ${customer.cylinders || 0} × ${customer.cylinderType || '14.2kg'}
 💰 Payment: ${customer.payment?.status || 'Unknown'}${customer.payment?.status === 'Partial' ? ` (₹${customer.payment?.amount})` : ''}
 🏷️ Subsidy: ${customer.subsidy ? 'Yes' : 'No'}
-📅 Created: ${customer.createdAt ? new Date(customer.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}
+📅 Joined: ${customer.createdAt ? new Date(customer.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}
+📊 Total Transactions: ${paymentHistory.length}
+💳 Last Payment: ${customer.payment?.lastPaymentDate ? 
+  new Date(customer.payment.lastPaymentDate.seconds ? 
+    customer.payment.lastPaymentDate.toDate() : 
+    customer.payment.lastPaymentDate
+  ).toLocaleDateString() : 'Never'}${transactionDetails}
 
 ━━━━━━━━━━━━━━━━━━━━━
-Generated from LPG Shop App
+Generated from LPG MAP
       `.trim();
 
       Share.share({
@@ -138,7 +187,7 @@ Generated from LPG Shop App
       <Text style={styles.customerName}>{item.name}</Text>
       <Text style={styles.customerPhone}>📞 {item.phone}</Text>
       <Text style={styles.customerDetails}>
-        🛢️ {item.cylinders} cylinders • 💰 {item.payment?.status || 'Unknown'}
+        🛢️ {item.cylinders || 0} × {item.cylinderType || '14.2kg'} • 💰 {item.payment?.status || 'Unknown'} • 📊 {item.paymentHistory ? item.paymentHistory.length : 0} transactions
       </Text>
       <Text style={styles.shareHint}>Tap to share this customer's details</Text>
     </TouchableOpacity>

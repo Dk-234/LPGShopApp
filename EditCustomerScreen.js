@@ -12,6 +12,7 @@ export default function EditCustomerScreen({ route, navigation }) {
   const [category, setCategory] = useState(customer.category || 'Domestic');
   const [address, setAddress] = useState(customer.address || '');
   const [cylinders, setCylinders] = useState(customer.cylinders || 1);
+  const [cylinderType, setCylinderType] = useState(customer.cylinderType || '14.2kg');
   const [subsidy, setSubsidy] = useState(customer.subsidy || false);
 
   const handleUpdate = async () => {
@@ -28,6 +29,7 @@ export default function EditCustomerScreen({ route, navigation }) {
         category: category,
         address: address,
         cylinders: cylinders,
+        cylinderType: cylinderType,
         subsidy: subsidy,
         updatedAt: new Date(),
       });
@@ -102,6 +104,17 @@ export default function EditCustomerScreen({ route, navigation }) {
           style={styles.input}
           multiline
         />
+        
+        <Text style={styles.label}>Cylinder Type:</Text>
+        <Picker
+          selectedValue={cylinderType}
+          onValueChange={setCylinderType}
+          style={styles.input}
+        >
+          <Picker.Item label="14.2kg" value="14.2kg" />
+          <Picker.Item label="5kg" value="5kg" />
+          <Picker.Item label="19kg" value="19kg" />
+        </Picker>
         
         <Text style={styles.label}>Number of Cylinders: {cylinders}</Text>
         <View style={styles.counterContainer}>

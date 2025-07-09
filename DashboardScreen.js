@@ -57,9 +57,18 @@ export default function DashboardScreen({ navigation }) {
     if (customers.length === 0 && bookings.length === 0) return;
     
     // Calculate booking payment stats (from bookings, not customers)
-    const unpaidOrders = bookings.filter(booking => booking.payment?.status === 'Pending' || !booking.payment?.status);
-    const paidOrders = bookings.filter(booking => booking.payment?.status === 'Paid');
-    const partialOrders = bookings.filter(booking => booking.payment?.status === 'Partial');
+    const unpaidOrders = bookings.filter(booking => 
+      (booking.payment?.status === 'Pending' || !booking.payment?.status) && 
+      booking.status !== 'Delivered'
+    );
+    const paidOrders = bookings.filter(booking => 
+      booking.payment?.status === 'Paid' && 
+      booking.status !== 'Delivered'
+    );
+    const partialOrders = bookings.filter(booking => 
+      booking.payment?.status === 'Partial' && 
+      booking.status !== 'Delivered'
+    );
     
     // Calculate customer category stats
     const domesticCustomers = customers.filter(customer => customer.category === 'Domestic');
