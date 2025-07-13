@@ -4,12 +4,19 @@ import { collection, query, where, getDocs, addDoc, doc, updateDoc, onSnapshot, 
 import { Picker } from '@react-native-picker/picker';
 import { db } from './firebaseConfig';
 
-export default function InventoryScreen() {
+export default function InventoryScreen({ navigation }) {
   const [counts, setCounts] = useState({
     fullCylinders: 0,
     emptyCylinders: 0,
     availableStoves: 0,
     lentStoves: 0,
+  });
+  
+  // Detailed cylinder counts by type
+  const [cylinderCounts, setCylinderCounts] = useState({
+    "14.2kg": { FULL: 0, EMPTY: 0 },
+    "5kg": { FULL: 0, EMPTY: 0 },
+    "19kg": { FULL: 0, EMPTY: 0 }
   });
 
   // Modal states
@@ -23,12 +30,13 @@ export default function InventoryScreen() {
   const [detailTitle, setDetailTitle] = useState('');
 
   // Cylinder form states
+  const [cylinderAction, setCylinderAction] = useState("ADD"); // ADD or REMOVE
   const [cylinderType, setCylinderType] = useState("14.2kg");
   const [cylinderStatus, setCylinderStatus] = useState("FULL");
   const [cylinderQuantity, setCylinderQuantity] = useState("1");
 
   // Stove form states
-  const [stoveAction, setStoveAction] = useState("ADD"); // ADD or LEND
+  const [stoveAction, setStoveAction] = useState("ADD"); // ADD, LEND, or REMOVE
   const [stoveModel, setStoveModel] = useState("Single Burner");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState("PAID"); // PAID or PENDING
@@ -43,9 +51,8 @@ export default function InventoryScreen() {
 
   const fetchInventory = async () => {
     try {
-      // Cylinders
-      const fullCylindersQuery = query(collection(db, "cylinders"), where("status", "==", "FULL"));
-      const emptyCylindersQuery = query(collection(db, "cylinders"), where("status", "==", "EMPTY"));
+      // Cylinders - get all and count by type and status
+      const cylindersQuery = query(collection(db, "cylinders"));
       
       // Stoves
       const availableStovesQuery = query(collection(db, "stoves"), where("status", "==", "AVAILABLE"));
@@ -54,17 +61,39 @@ export default function InventoryScreen() {
       // Customers
       const customersQuery = query(collection(db, "customers"));
 
-      const [fullSnap, emptySnap, availableSnap, lentSnap, customersSnap] = await Promise.all([
-        getDocs(fullCylindersQuery),
-        getDocs(emptyCylindersQuery),
+      const [cylindersSnap, availableSnap, lentSnap, customersSnap] = await Promise.all([
+        getDocs(cylindersQuery),
         getDocs(availableStovesQuery),
         getDocs(lentStovesQuery),
         getDocs(customersQuery),
       ]);
 
+      // Count cylinders by type and status
+      const newCylinderCounts = {
+        "14.2kg": { FULL: 0, EMPTY: 0 },
+        "5kg": { FULL: 0, EMPTY: 0 },
+        "19kg": { FULL: 0, EMPTY: 0 }
+      };
+      
+      let totalFull = 0;
+      let totalEmpty = 0;
+      
+      cylindersSnap.forEach((doc) => {
+        const data = doc.data();
+        const type = data.type;
+        const status = data.status;
+        
+        if (newCylinderCounts[type] && (status === "FULL" || status === "EMPTY")) {
+          newCylinderCounts[type][status]++;
+          if (status === "FULL") totalFull++;
+          if (status === "EMPTY") totalEmpty++;
+        }
+      });
+
+      setCylinderCounts(newCylinderCounts);
       setCounts({
-        fullCylinders: fullSnap.size,
-        emptyCylinders: emptySnap.size,
+        fullCylinders: totalFull,
+        emptyCylinders: totalEmpty,
         availableStoves: availableSnap.size,
         lentStoves: lentSnap.size,
       });
@@ -159,8 +188,8 @@ export default function InventoryScreen() {
     };
   }, []);
 
-  // Handle cylinder addition
-  const handleAddCylinders = async () => {
+  // Handle cylinder actions (ADD/REMOVE)
+  const handleCylinderAction = async () => {
     const quantity = parseInt(cylinderQuantity);
     if (!quantity || quantity <= 0) {
       Alert.alert("Error", "Please enter a valid quantity");
@@ -168,18 +197,43 @@ export default function InventoryScreen() {
     }
 
     try {
-      for (let i = 0; i < quantity; i++) {
-        await addDoc(collection(db, "cylinders"), {
-          type: cylinderType,
-          status: cylinderStatus,
-          lastUpdated: new Date(),
-        });
+      if (cylinderAction === "ADD") {
+        // Add cylinders
+        for (let i = 0; i < quantity; i++) {
+          await addDoc(collection(db, "cylinders"), {
+            type: cylinderType,
+            status: cylinderStatus,
+            lastUpdated: new Date(),
+          });
+        }
+        Alert.alert("Success", `${quantity} ${cylinderType} cylinders (${cylinderStatus}) added to inventory!`);
+      } else if (cylinderAction === "REMOVE") {
+        // Remove cylinders
+        const cylindersQuery = query(
+          collection(db, "cylinders"), 
+          where("type", "==", cylinderType),
+          where("status", "==", cylinderStatus)
+        );
+        const snapshot = await getDocs(cylindersQuery);
+        
+        if (snapshot.size < quantity) {
+          Alert.alert("Error", `Only ${snapshot.size} ${cylinderType} cylinders (${cylinderStatus}) available. Cannot remove ${quantity}.`);
+          return;
+        }
+
+        const cylindersToRemove = snapshot.docs.slice(0, quantity);
+        const deletePromises = cylindersToRemove.map(cylinderDoc => 
+          deleteDoc(doc(db, "cylinders", cylinderDoc.id))
+        );
+        
+        await Promise.all(deletePromises);
+        Alert.alert("Success", `${quantity} ${cylinderType} cylinders (${cylinderStatus}) removed from inventory!`);
       }
-      Alert.alert("Success", `${quantity} ${cylinderType} cylinders (${cylinderStatus}) added to inventory!`);
+      
       setCylinderQuantity("1");
       setCylinderModalVisible(false);
     } catch (error) {
-      Alert.alert("Error", "Failed to add cylinders: " + error.message);
+      Alert.alert("Error", `Failed to ${cylinderAction.toLowerCase()} cylinders: ` + error.message);
     }
   };
 
@@ -230,6 +284,24 @@ export default function InventoryScreen() {
         setStoveModalVisible(false);
       } catch (error) {
         Alert.alert("Error", "Failed to lend stove: " + error.message);
+      }
+    } else if (stoveAction === "REMOVE") {
+      try {
+        // Find available stoves of the selected model
+        const stovesToRemove = availableStoves.filter(stove => stove.model === stoveModel);
+        
+        if (stovesToRemove.length === 0) {
+          Alert.alert("Error", `No ${stoveModel} available to remove`);
+          return;
+        }
+
+        // Remove the first available stove of this model
+        await deleteDoc(doc(db, "stoves", stovesToRemove[0].id));
+        
+        Alert.alert("Success", `${stoveModel} removed from inventory!`);
+        setStoveModalVisible(false);
+      } catch (error) {
+        Alert.alert("Error", "Failed to remove stove: " + error.message);
       }
     }
   };
@@ -398,7 +470,7 @@ export default function InventoryScreen() {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollContainer}>
-        <Text style={styles.header}>Inventory Management</Text>
+        <Text style={styles.header}>Shubh Labh 🕉</Text>
 
         {/* Inventory Summary Cards */}
         <View style={styles.summarySection}>
@@ -453,16 +525,22 @@ export default function InventoryScreen() {
           
           <TouchableOpacity 
             style={[styles.actionButton, styles.primaryButton]}
-            onPress={() => setCylinderModalVisible(true)}
+            onPress={() => {
+              setCylinderAction("ADD");
+              setCylinderModalVisible(true);
+            }}
           >
-            <Text style={styles.actionButtonText}>🔥 Update Cylinders</Text>
+            <Text style={styles.actionButtonText}>🔄 Manage Cylinders</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
             style={[styles.actionButton, styles.secondaryButton]}
-            onPress={() => setStoveModalVisible(true)}
+            onPress={() => {
+              setStoveAction("ADD");
+              setStoveModalVisible(true);
+            }}
           >
-            <Text style={styles.actionButtonText}>🍳 Manage Stoves</Text>
+            <Text style={styles.actionButtonText}>🔥 Manage Stoves</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -484,13 +562,25 @@ export default function InventoryScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Update Cylinder Stock</Text>
+              <Text style={styles.modalTitle}>Manage Cylinders</Text>
               <TouchableOpacity onPress={() => setCylinderModalVisible(false)}>
                 <Text style={styles.closeButton}>✕</Text>
               </TouchableOpacity>
             </View>
             
             <View style={styles.modalContent}>
+              <Text style={styles.inputLabel}>Action:</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={cylinderAction}
+                  onValueChange={setCylinderAction}
+                  style={styles.picker}
+                >
+                  <Picker.Item label="Add to Inventory" value="ADD" />
+                  <Picker.Item label="Remove from Inventory" value="REMOVE" />
+                </Picker>
+              </View>
+
               <Text style={styles.inputLabel}>Cylinder Type:</Text>
               <View style={styles.pickerContainer}>
                 <Picker
@@ -525,6 +615,12 @@ export default function InventoryScreen() {
                 style={styles.textInput}
               />
 
+              {cylinderAction === "REMOVE" && (
+                <Text style={styles.helperText}>
+                  Available {cylinderType} ({cylinderStatus}): {cylinderCounts[cylinderType]?.[cylinderStatus] || 0}
+                </Text>
+              )}
+
               <View style={styles.buttonContainer}>
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.cancelButton]}
@@ -534,9 +630,11 @@ export default function InventoryScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleAddCylinders}
+                  onPress={handleCylinderAction}
                 >
-                  <Text style={styles.confirmButtonText}>Add to Inventory</Text>
+                  <Text style={styles.confirmButtonText}>
+                    {cylinderAction === "ADD" ? "Add to Inventory" : "Remove"}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -570,6 +668,7 @@ export default function InventoryScreen() {
                 >
                   <Picker.Item label="Add New Stove" value="ADD" />
                   <Picker.Item label="Lend to Customer" value="LEND" />
+                  <Picker.Item label="Remove from Inventory" value="REMOVE" />
                 </Picker>
               </View>
 
@@ -619,6 +718,12 @@ export default function InventoryScreen() {
                 </View>
               )}
 
+              {stoveAction === "REMOVE" && (
+                <Text style={styles.helperText}>
+                  Available {stoveModel}: {availableStoves.filter(s => s.model === stoveModel).length}
+                </Text>
+              )}
+
               <View style={styles.buttonContainer}>
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.cancelButton]}
@@ -631,7 +736,7 @@ export default function InventoryScreen() {
                   onPress={handleStoveAction}
                 >
                   <Text style={styles.confirmButtonText}>
-                    {stoveAction === "ADD" ? "Add Stove" : "Lend Stove"}
+                    {stoveAction === "ADD" ? "Add Stove" : stoveAction === "LEND" ? "Lend Stove" : "Remove Stove"}
                   </Text>
                 </TouchableOpacity>
               </View>

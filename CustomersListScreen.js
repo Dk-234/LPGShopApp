@@ -1,10 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import { collection, query, onSnapshot } from 'firebase/firestore';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, useColorScheme, TextInput, Alert } from 'react-native';
+import { collection, query, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  success: '#34C759',
+  warning: '#FF9500',
+  error: '#FF3B30',
+  inputBackground: isDark ? '#2d2d2d' : '#ffffff',
+  inputBorder: isDark ? '#444444' : '#ccc',
+});
+
 export default function CustomersListScreen({ navigation, route }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const [customers, setCustomers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
@@ -20,26 +41,68 @@ export default function CustomersListScreen({ navigation, route }) {
     return unsubscribe;
   }, []);
 
-  // Filter customers based on the filter parameter
+  // Filter customers based on the filter parameter and search query
   const getFilteredCustomers = () => {
+    let filtered = customers;
+    
+    // Apply category filter first
     if (filter === 'domestic') {
-      return customers.filter(customer => customer.category === 'Domestic');
+      filtered = filtered.filter(customer => customer.category === 'Domestic');
     } else if (filter === 'commercial') {
-      return customers.filter(customer => customer.category === 'Commercial');
+      filtered = filtered.filter(customer => customer.category === 'Commercial');
     } else if (filter === 'subsidy') {
-      return customers.filter(customer => customer.subsidy === true);
+      filtered = filtered.filter(customer => customer.subsidy === true);
     } else if (filter === 'today') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      return customers.filter(customer => {
+      filtered = filtered.filter(customer => {
         const createdAt = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
         return createdAt >= today;
       });
     }
-    return customers;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(customer => 
+        customer.name?.toLowerCase().includes(query) ||
+        customer.phone?.includes(query) ||
+        customer.bookId?.toLowerCase().includes(query) ||
+        customer.address?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
   };
 
   const filteredCustomers = getFilteredCustomers();
+
+  // Delete customer function
+  const deleteCustomer = async (customerId, customerName) => {
+    Alert.alert(
+      'Delete Customer',
+      `Are you sure you want to delete "${customerName}"? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'customers', customerId));
+              Alert.alert('Success', 'Customer deleted successfully');
+            } catch (error) {
+              console.error('Error deleting customer:', error);
+              Alert.alert('Error', 'Failed to delete customer. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const getFilterTitle = () => {
     switch (filter) {
@@ -63,11 +126,11 @@ export default function CustomersListScreen({ navigation, route }) {
 
   const getFilterBannerStyle = () => {
     switch (filter) {
-      case 'domestic': return { backgroundColor: '#e3f2fd', borderColor: '#2196f3' };
-      case 'commercial': return { backgroundColor: '#fce4ec', borderColor: '#e91e63' };
-      case 'subsidy': return { backgroundColor: '#f1f8e9', borderColor: '#8bc34a' };
-      case 'today': return { backgroundColor: '#f3e5f5', borderColor: '#9c27b0' };
-      default: return { backgroundColor: '#fff3cd', borderColor: '#ffeaa7' };
+      case 'domestic': return { backgroundColor: colors.primary + '20', borderColor: colors.primary };
+      case 'commercial': return { backgroundColor: colors.error + '20', borderColor: colors.error };
+      case 'subsidy': return { backgroundColor: colors.success + '20', borderColor: colors.success };
+      case 'today': return { backgroundColor: colors.warning + '20', borderColor: colors.warning };
+      default: return { backgroundColor: colors.warning + '20', borderColor: colors.warning };
     }
   };
 
@@ -78,14 +141,23 @@ export default function CustomersListScreen({ navigation, route }) {
         setSelectedCustomer(item);
         setModalVisible(true);
       }}
+      onLongPress={() => deleteCustomer(item.id, item.name)}
     >
-      <Text style={styles.name}>{item.name}</Text>
-      <Text>Phone: {item.phone}</Text>
-      {item.bookId && <Text>Book ID: {item.bookId}</Text>}
-      <Text>Category: {item.category || 'Not Set'}</Text>
-      <Text>Cylinders: {item.cylinders || 0} × {item.cylinderType || '14.2kg'}</Text>
+      <View style={styles.itemHeader}>
+        <Text style={styles.name}>{item.name}</Text>
+        <TouchableOpacity 
+          style={styles.deleteButton}
+          onPress={() => deleteCustomer(item.id, item.name)}
+        >
+          <Text style={styles.deleteButtonText}>🗑️</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.itemText}>📞 {item.phone}</Text>
+      {item.bookId && <Text style={styles.itemText}>📖 Book ID: {item.bookId}</Text>}
+      <Text style={styles.itemText}>🏷️ Category: {item.category || 'Not Set'}</Text>
+      <Text style={styles.itemText}>🛢️ Cylinders: {item.cylinders || 0} × {item.cylinderType || '14.2kg'}</Text>
       <Text style={styles.paymentDate}>
-        Last Payment: {item.payment?.lastPaymentDate ? 
+        💰 Last Payment: {item.payment?.lastPaymentDate ? 
           new Date(item.payment.lastPaymentDate.seconds ? 
             item.payment.lastPaymentDate.toDate() : 
             item.payment.lastPaymentDate
@@ -93,20 +165,11 @@ export default function CustomersListScreen({ navigation, route }) {
           'No payment recorded'}
       </Text>
       <Text style={styles.paymentHistory}>
-        Payment History: {item.paymentHistory ? 
+        📊 Transactions: {item.paymentHistory ? 
           `${item.paymentHistory.length} transaction${item.paymentHistory.length !== 1 ? 's' : ''}` : 
           'No transactions'}
       </Text>
       {item.subsidy && <Text style={styles.subsidyText}>💰 Subsidy Applicable</Text>}
-      <TouchableOpacity 
-        style={styles.bookButton}
-        onPress={(e) => {
-          e.stopPropagation();
-          navigation.navigate('BookingScreen', { customerId: item.id });
-        }}
-      >
-        <Text style={styles.bookText}>Book Cylinder</Text>
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 
@@ -181,7 +244,10 @@ export default function CustomersListScreen({ navigation, route }) {
                     <Text style={[styles.detailValue, styles.subsidyValue]}>💰 Applicable</Text>
                   </View>
                 )}
-              </View>                <View style={styles.detailSection}>
+              </View>
+
+              {/* Payment Information Section */}
+              <View style={styles.detailSection}>
                   <Text style={styles.sectionTitle}>💳 Payment Information</Text>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Last Payment:</Text>
@@ -300,6 +366,28 @@ export default function CustomersListScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
+      {/* Export Button */}
+      <View style={styles.topBar}>
+        <TouchableOpacity 
+          style={styles.exportButton}
+          onPress={() => navigation.navigate('ExportScreen')}
+        >
+          <Text style={styles.exportButtonText}>📊 Export Data</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search customers by name, phone, book ID, or address..."
+          placeholderTextColor={colors.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          clearButtonMode="while-editing"
+        />
+      </View>
+
       {filter && (
         <View style={[styles.filterBanner, getFilterBannerStyle()]}>
           <View style={styles.filterTextContainer}>
@@ -322,7 +410,10 @@ export default function CustomersListScreen({ navigation, route }) {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {getEmptyMessage()}
+              {searchQuery.trim() ? 
+                `No customers found matching "${searchQuery}"` :
+                getEmptyMessage()
+              }
             </Text>
           </View>
         }
@@ -333,29 +424,39 @@ export default function CustomersListScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 10 },
+const createStyles = (colors) => StyleSheet.create({
+  container: { 
+    flex: 1, 
+    padding: 10, 
+    backgroundColor: colors.background,
+  },
   item: { 
     padding: 15, 
     borderBottomWidth: 1, 
-    borderBottomColor: '#eee',
-    backgroundColor: '#fff',
+    borderBottomColor: colors.border,
+    backgroundColor: colors.card,
     marginBottom: 5,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  name: { fontWeight: 'bold', fontSize: 16 },
+  name: { 
+    fontWeight: 'bold', 
+    fontSize: 16,
+    color: colors.text,
+  },
   subsidyText: {
-    color: '#34C759',
+    color: colors.success,
     fontWeight: 'bold',
     fontSize: 12,
   },
   filterBanner: {
-    backgroundColor: '#fff3cd',
+    backgroundColor: colors.warning + '20', // Add transparency
     padding: 15,
     marginBottom: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ffeaa7',
+    borderColor: colors.warning,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -366,16 +467,16 @@ const styles = StyleSheet.create({
   filterText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text,
     marginBottom: 2,
   },
   filterCount: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textSecondary,
     fontStyle: 'italic',
   },
   clearFilterButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 15,
@@ -391,12 +492,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
     fontStyle: 'italic',
   },
   bookButton: { 
-    backgroundColor: '#4CAF50', 
+    backgroundColor: colors.success, 
     padding: 5, 
     borderRadius: 5,
     marginTop: 5,
@@ -407,13 +508,13 @@ const styles = StyleSheet.create({
   },
   paymentDate: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textSecondary,
     fontStyle: 'italic',
     marginTop: 2,
   },
   paymentHistory: {
     fontSize: 11,
-    color: '#007AFF',
+    color: colors.primary,
     marginTop: 1,
     fontWeight: '500',
   },
@@ -426,7 +527,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    backgroundColor: 'white',
+    backgroundColor: colors.card,
     borderRadius: 15,
     width: '90%',
     maxHeight: '80%',
@@ -435,6 +536,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -442,19 +545,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text,
   },
   headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   editButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 15,
@@ -470,7 +573,7 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     fontSize: 20,
-    color: '#999',
+    color: colors.textSecondary,
     fontWeight: 'bold',
   },
   modalContent: {
@@ -482,63 +585,67 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text,
     marginBottom: 10,
     paddingBottom: 5,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: colors.border,
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 5,
     borderBottomWidth: 0.5,
-    borderBottomColor: '#f5f5f5',
+    borderBottomColor: colors.border,
   },
   detailLabel: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
     fontWeight: '500',
     flex: 1,
   },
   detailValue: {
     fontSize: 14,
-    color: '#333',
+    color: colors.text,
     flex: 2,
     textAlign: 'right',
   },
   clickableText: {
-    color: '#007AFF',
+    color: colors.primary,
     fontWeight: '500',
   },
   subsidyValue: {
-    color: '#34C759',
+    color: colors.success,
     fontWeight: 'bold',
   },
   bookIdText: {
     fontFamily: 'monospace',
     fontWeight: 'bold',
-    color: '#007AFF',
+    color: colors.primary,
   },
   paymentHistoryExpanded: {
     marginTop: 10,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     borderRadius: 8,
     padding: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   historyTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text,
     marginBottom: 8,
   },
   transactionItem: {
-    backgroundColor: 'white',
+    backgroundColor: colors.card,
     borderRadius: 6,
     padding: 10,
     marginBottom: 8,
     borderLeftWidth: 3,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   transactionRow: {
     flexDirection: 'row',
@@ -548,35 +655,35 @@ const styles = StyleSheet.create({
   },
   transactionDate: {
     fontSize: 13,
-    color: '#333',
+    color: colors.text,
     fontWeight: '500',
   },
   transactionAmount: {
     fontSize: 13,
-    color: '#007AFF',
+    color: colors.primary,
     fontWeight: 'bold',
   },
   transactionStatus: {
     fontSize: 11,
-    color: '#666',
+    color: colors.textSecondary,
     fontStyle: 'italic',
   },
   completedStatus: {
-    color: '#34C759',
+    color: colors.success,
     fontWeight: 'bold',
   },
   partialStatus: {
-    color: '#FF9500',
+    color: colors.warning,
     fontWeight: 'bold',
   },
   transactionBooking: {
     fontSize: 10,
-    color: '#999',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   transactionDetails: {
     fontSize: 10,
-    color: '#666',
+    color: colors.textSecondary,
     marginTop: 1,
     fontStyle: 'italic',
   },
@@ -585,7 +692,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   bookLargeButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: colors.success,
     padding: 15,
     borderRadius: 10,
     alignItems: 'center',
@@ -595,4 +702,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  searchContainer: {
+    padding: 15,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  searchInput: {
+    backgroundColor: colors.inputBackground,
+    borderColor: colors.inputBorder,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: colors.text,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  itemText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: colors.error + '20',
+    marginLeft: 10,
+  },
+  deleteButtonText: {
+    fontSize: 16,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 15,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  exportButton: {
+    backgroundColor: colors.warning,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  exportButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  }
 });

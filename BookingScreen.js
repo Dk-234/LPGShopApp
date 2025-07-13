@@ -1,11 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
-import { doc, getDoc, collection, addDoc, query, onSnapshot, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, Switch, useColorScheme } from 'react-native';
+import { doc, getDoc, collection, addDoc, query, onSnapshot, where, getDocs, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  success: '#34C759',
+  warning: '#FF9500',
+  error: '#FF3B30',
+  inputBackground: isDark ? '#2d2d2d' : '#ffffff',
+  inputBorder: isDark ? '#444444' : '#ccc',
+});
+
 export default function BookingScreen({ route, navigation }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const { customerId } = route.params || {};
   const [customer, setCustomer] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -23,20 +43,55 @@ export default function BookingScreen({ route, navigation }) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [emptyCylinderReceived, setEmptyCylinderReceived] = useState(false);
 
-  // Price per cylinder type
-  const CYLINDER_PRICES = {
+  // Price per cylinder type - loaded from Firebase
+  const [CYLINDER_PRICES, setCYLINDER_PRICES] = useState({
     '14.2kg': 1150,
     '5kg': 450,
     '19kg': 1350
+  });
+
+  // Editable service fees
+  const [serviceFees, setServiceFees] = useState({
+    'No': 0,
+    'Pickup': 0,
+    'Drop': 0,
+    'Pickup + Drop': 0
+  });
+
+  // Service fees for calculations
+  const SERVICE_FEES = serviceFees;
+
+  // Load prices and service fees from Firebase
+  const loadPrices = async () => {
+    try {
+      const pricesDoc = await getDoc(doc(db, "settings", "prices"));
+      if (pricesDoc.exists()) {
+        setCYLINDER_PRICES(pricesDoc.data());
+      }
+      
+      // Load service fees
+      const serviceFeesDoc = await getDoc(doc(db, "settings", "serviceFees"));
+      if (serviceFeesDoc.exists()) {
+        setServiceFees(serviceFeesDoc.data());
+      } else {
+        // Set default service fees if not found
+        const defaultServiceFees = {
+          'No': 0,
+          'Pickup': 0,
+          'Drop': 0,
+          'Pickup + Drop': 0
+        };
+        setServiceFees(defaultServiceFees);
+      }
+    } catch (error) {
+      console.error("Error loading prices:", error);
+    }
   };
 
-  // Service fees
-  const SERVICE_FEES = {
-    'No': 0,
-    'Pickup': 50,
-    'Drop': 50,
-    'Pickup + Drop': 70
-  };
+  // Load prices on component mount
+  useEffect(() => {
+    loadPrices();
+  }, []);
 
   // Fetch all customers for dropdown if no customerId provided
   useEffect(() => {
@@ -72,13 +127,13 @@ export default function BookingScreen({ route, navigation }) {
   useEffect(() => {
     if (paymentStatus === 'Paid') {
       const cylinderCost = cylinders * CYLINDER_PRICES[cylinderType];
-      const serviceFee = SERVICE_FEES[serviceType] || 0;
+      const serviceFee = serviceFees[serviceType] || 0;
       const totalAmount = cylinderCost + serviceFee;
       setAmount(totalAmount.toString());
     } else if (paymentStatus === 'Pending') {
       setAmount('');
     }
-  }, [paymentStatus, cylinders, serviceType, cylinderType]);
+  }, [paymentStatus, cylinders, serviceType, cylinderType, CYLINDER_PRICES, serviceFees]);
 
   // Fetch customer details
   useEffect(() => {
@@ -140,6 +195,16 @@ export default function BookingScreen({ route, navigation }) {
     }
   };
 
+  const saveServiceFees = async () => {
+    try {
+      await setDoc(doc(db, "settings", "serviceFees"), serviceFees);
+      alert("Service fees saved successfully!");
+    } catch (error) {
+      console.error("Error saving service fees:", error);
+      alert("Error saving service fees. Please try again.");
+    }
+  };
+
   const handleBooking = async () => {
     const customerIdToBook = customerId || selectedCustomerId;
     if (!customerIdToBook) {
@@ -147,14 +212,14 @@ export default function BookingScreen({ route, navigation }) {
       return;
     }
 
-    // Validate DSC number (4 digits)
+    // Validate DAC number (4 digits)
     if (!dscNumber.trim()) {
-      alert("Please enter DSC number!");
+      alert("Please enter DAC number!");
       return;
     }
 
     if (!/^\d{4}$/.test(dscNumber)) {
-      alert("DSC number must be exactly 4 digits!");
+      alert("DAC number must be exactly 4 digits!");
       return;
     }
 
@@ -403,9 +468,9 @@ export default function BookingScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.label}>DSC Number (4 digits):</Text>
+      <Text style={styles.label}>DAC Number (4 digits):</Text>
       <TextInput
-        placeholder="Enter 4-digit DSC number"
+        placeholder="Enter 4-digit DAC number"
         value={dscNumber}
         onChangeText={(text) => {
           // Only allow digits and limit to 4 characters
@@ -494,6 +559,50 @@ export default function BookingScreen({ route, navigation }) {
         />
       )}
 
+      {/* Editable Service Fees Section */}
+      <View style={[styles.serviceFeeEditor, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.serviceFeeTitle, { color: colors.text }]}>🔧 Edit Service Fees (For This Booking)</Text>
+        <View style={styles.feeInputRow}>
+          <Text style={[styles.feeLabel, { color: colors.text }]}>Pickup Fee:</Text>
+          <TextInput
+            style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+            value={serviceFees.Pickup.toString()}
+            onChangeText={(text) => setServiceFees(prev => ({...prev, Pickup: parseInt(text) || 0}))}
+            keyboardType="numeric"
+            placeholder=""
+            placeholderTextColor={colors.textSecondary}
+          />
+        </View>
+        <View style={styles.feeInputRow}>
+          <Text style={[styles.feeLabel, { color: colors.text }]}>Drop Fee:</Text>
+          <TextInput
+            style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+            value={serviceFees.Drop.toString()}
+            onChangeText={(text) => setServiceFees(prev => ({...prev, Drop: parseInt(text) || 0}))}
+            keyboardType="numeric"
+            placeholder=""
+            placeholderTextColor={colors.textSecondary}
+          />
+        </View>
+        <View style={styles.feeInputRow}>
+          <Text style={[styles.feeLabel, { color: colors.text }]}>Pickup + Drop:</Text>
+          <TextInput
+            style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
+            value={serviceFees['Pickup + Drop'].toString()}
+            onChangeText={(text) => setServiceFees(prev => ({...prev, 'Pickup + Drop': parseInt(text) || 0}))}
+            keyboardType="numeric"
+            placeholder=""
+            placeholderTextColor={colors.textSecondary}
+          />
+        </View>
+        <TouchableOpacity 
+          style={[styles.saveFeesButton, { backgroundColor: colors.primary }]} 
+          onPress={saveServiceFees}
+        >
+          <Text style={styles.saveFeesButtonText}>💾 Save Service Fees for All Future Bookings</Text>
+        </TouchableOpacity>
+      </View>
+
       <Text style={styles.label}>Service Type:</Text>
       <View style={styles.serviceOptions}>
         <TouchableOpacity
@@ -572,8 +681,12 @@ export default function BookingScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
+const createStyles = (colors) => StyleSheet.create({
+  container: { 
+    flex: 1, 
+    padding: 20,
+    backgroundColor: colors.background,
+  },
   scrollContent: { 
     paddingBottom: 30,
     flexGrow: 1,
@@ -583,10 +696,30 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     paddingHorizontal: 5,
   },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', padding: 10, marginBottom: 10 },
-  label: { marginBottom: 5, fontWeight: 'bold' },
-  cylinderLimit: { fontSize: 12, color: '#666', fontWeight: 'normal' },
+  title: { 
+    fontSize: 20, 
+    fontWeight: 'bold', 
+    marginBottom: 20,
+    color: colors.text,
+  },
+  input: { 
+    borderWidth: 1, 
+    borderColor: colors.inputBorder, 
+    padding: 10, 
+    marginBottom: 10,
+    backgroundColor: colors.inputBackground,
+    color: colors.text,
+  },
+  label: { 
+    marginBottom: 5, 
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  cylinderLimit: { 
+    fontSize: 12, 
+    color: colors.textSecondary, 
+    fontWeight: 'normal',
+  },
   serviceOptions: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   serviceButton: { padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 5 },
   selectedService: { backgroundColor: '#e3f2fd', borderColor: '#2196f3' },
@@ -832,5 +965,45 @@ const styles = StyleSheet.create({
     color: '#155724',
     fontWeight: 'bold',
     fontSize: 12,
+  },
+  serviceFeeEditor: {
+    padding: 15,
+    borderRadius: 8,
+    marginVertical: 10,
+    borderWidth: 1,
+  },
+  serviceFeeTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  feeInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  feeLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    width: 100,
+  },
+  feeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 8,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  saveFeesButton: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  saveFeesButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

@@ -1,25 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Animated } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Animated, useColorScheme } from 'react-native';
 import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, deleteDoc, addDoc, getDocs } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Picker } from '@react-native-picker/picker';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  success: '#34C759',
+  warning: '#FF9500',
+  error: '#FF3B30',
+});
+
 export default function BookingsListScreen({ route }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const [bookings, setBookings] = useState([]);
   const [bookingsWithCustomers, setBookingsWithCustomers] = useState([]);
   const [filter, setFilter] = useState('All'); // All/Pending/Delivered
   
-  // Pricing constants (should match BookingScreen)
-  const CYLINDER_PRICES = {
+  // Pricing constants (loaded from Firebase)
+  const [CYLINDER_PRICES, setCYLINDER_PRICES] = useState({
     '14.2kg': 1150,
     '5kg': 450,
     '19kg': 1350
-  };
-  const SERVICE_FEES = {
+  });
+  const [SERVICE_FEES, setSERVICE_FEES] = useState({
+    'No': 0,
     'Pickup': 50,
     'Drop': 50,
-    'Both': 70
-  };
+    'Pickup + Drop': 70
+  });
   const [paymentFilter, setPaymentFilter] = useState('All'); // All/Pending/Paid/Partial
   
   // Get initial filter from route params
@@ -43,6 +62,30 @@ export default function BookingsListScreen({ route }) {
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(300));
+
+  // Load prices and service fees from Firebase
+  const loadPricesAndFees = async () => {
+    try {
+      // Load cylinder prices
+      const pricesDoc = await getDoc(doc(db, "settings", "prices"));
+      if (pricesDoc.exists()) {
+        setCYLINDER_PRICES(pricesDoc.data());
+      }
+      
+      // Load service fees
+      const serviceFeesDoc = await getDoc(doc(db, "settings", "serviceFees"));
+      if (serviceFeesDoc.exists()) {
+        setSERVICE_FEES(serviceFeesDoc.data());
+      }
+    } catch (error) {
+      console.error("Error loading prices and fees:", error);
+    }
+  };
+
+  // Load prices and fees on component mount
+  useEffect(() => {
+    loadPricesAndFees();
+  }, []);
 
   useEffect(() => {
     let q;
@@ -876,17 +919,21 @@ export default function BookingsListScreen({ route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 10 },
+const createStyles = (colors) => StyleSheet.create({
+  container: { 
+    flex: 1, 
+    padding: 10, 
+    backgroundColor: colors.background,
+  },
   filterLabel: {
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 8,
     marginTop: 10,
-    color: '#333',
+    color: colors.text,
   },
   bookingCard: {
-    backgroundColor: 'white',
+    backgroundColor: colors.card,
     padding: 15,
     marginBottom: 10,
     borderRadius: 8,
@@ -896,38 +943,40 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   lockedCard: {
-    backgroundColor: '#f8f9fa',
-    borderLeftColor: '#6c757d',
+    backgroundColor: colors.surface,
+    borderLeftColor: colors.textSecondary,
     opacity: 0.8,
   },
   expiringSoonCard: {
-    backgroundColor: '#fff3cd',
-    borderLeftColor: '#ffc107',
+    backgroundColor: colors.warning + '20',
+    borderLeftColor: colors.warning,
     opacity: 0.9,
   },
   customerName: { 
     fontSize: 18, 
     fontWeight: 'bold', 
-    color: '#333',
+    color: colors.text,
     marginBottom: 5,
   },
   customerPhone: { 
     fontSize: 14, 
-    color: '#666',
+    color: colors.textSecondary,
     marginBottom: 8,
     fontWeight: '500',
   },
   bookingDetails: { 
     fontSize: 14, 
-    color: '#333',
+    color: colors.text,
     marginBottom: 3,
   },
   bookingStatus: {
     fontSize: 14,
-    color: '#333',
+    color: colors.text,
     marginTop: 5,
     fontWeight: '500',
   },
@@ -1188,16 +1237,18 @@ const styles = StyleSheet.create({
   },
   // Sorting info styles
   sortingInfo: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     padding: 10,
     borderRadius: 6,
     marginBottom: 10,
     borderLeftWidth: 3,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sortingText: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textSecondary,
     fontStyle: 'italic',
     textAlign: 'center',
   },

@@ -1,9 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { View, Button, Text, StyleSheet, Alert, Share, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import { View, Button, Text, StyleSheet, Alert, Share, FlatList, TouchableOpacity, TextInput, useColorScheme } from 'react-native';
 import { collection, getDocs, getFirestore } from 'firebase/firestore';
 import { app } from './firebaseConfig';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  success: '#34C759',
+  inputBackground: isDark ? '#2d2d2d' : '#ffffff',
+  inputBorder: isDark ? '#444444' : '#ccc',
+});
+
 export default function ExportScreen() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const [customers, setCustomers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const db = getFirestore(app);
@@ -245,24 +263,24 @@ Generated from LPG MAP
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: { 
     flex: 1, 
     padding: 20,
-    backgroundColor: '#f5f5f5'
+    backgroundColor: colors.background
   },
   title: { 
     fontSize: 24, 
     fontWeight: 'bold', 
     marginBottom: 10,
     textAlign: 'center',
-    color: '#333'
+    color: colors.text
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 20,
-    color: '#666'
+    color: colors.textSecondary
   },
   buttonContainer: {
     marginBottom: 10,
@@ -272,11 +290,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 20,
     marginBottom: 10,
-    color: '#333'
+    color: colors.text
   },
   instructions: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: 15,
     fontStyle: 'italic'
@@ -285,12 +303,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   customerItem: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     padding: 15,
     marginBottom: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colors.border,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -300,33 +318,34 @@ const styles = StyleSheet.create({
   customerName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text,
     marginBottom: 5,
   },
   customerPhone: {
     fontSize: 16,
-    color: '#007AFF',
+    color: colors.primary,
     marginBottom: 5,
   },
   customerDetails: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   shareHint: {
     fontSize: 12,
-    color: '#28a745',
+    color: colors.success,
     fontStyle: 'italic',
     textAlign: 'center',
   },
   searchInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: colors.inputBorder,
     padding: 12,
     marginBottom: 10,
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: colors.inputBackground,
     fontSize: 16,
+    color: colors.text,
   },
   emptyContainer: {
     padding: 40,
@@ -334,7 +353,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
     fontStyle: 'italic',
   }

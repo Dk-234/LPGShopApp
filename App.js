@@ -1,1140 +1,857 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, ScrollView, FlatList, Switch, TouchableOpacity, KeyboardAvoidingView, Platform, Dimensions, Modal } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
-import { getFirestore, collection, addDoc, query, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { app } from './firebaseConfig';
+import { View, Text, TextInput, Button, StyleSheet, ScrollView, FlatList, Switch, TouchableOpacity, KeyboardAvoidingView, Platform, Dimensions, Modal, Alert, useColorScheme, StatusBar } from 'react-native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { getFirestore, collection, addDoc, query, onSnapshot, doc, updateDoc, where, getDocs } from 'firebase/firestore';
+import { app, db } from './firebaseConfig';
 import { Picker } from '@react-native-picker/picker';
+
+// Import screens
 import ExportScreen from './ExportScreen';
 import DashboardScreen from './DashboardScreen';
 import BookingScreen from './BookingScreen';
 import BookingsListScreen from './BookingsListScreen';
+import CustomersListScreen from './CustomersListScreen';
 import InventoryScreen from './InventoryScreen';
+import UpdateCylindersScreen from './UpdateCylindersScreen';
+import ManageStovesScreen from './ManageStovesScreen';
 
-const Stack = createStackNavigator();
-const db = getFirestore(app);
+const Stack = createNativeStackNavigator();
 
 // Add Customer Screen Component
 function AddCustomerScreen({ navigation }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  
+  const getColors = (isDark) => ({
+    background: isDark ? '#121212' : '#ffffff',
+    surface: isDark ? '#1e1e1e' : '#f8f9fa',
+    card: isDark ? '#2d2d2d' : '#ffffff',
+    text: isDark ? '#ffffff' : '#000000',
+    textSecondary: isDark ? '#b0b0b0' : '#666666',
+    border: isDark ? '#404040' : '#e0e0e0',
+    primary: '#007AFF',
+    danger: isDark ? '#f44336' : '#dc3545',
+    warning: isDark ? '#ff9800' : '#ffc107'
+  });
+
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
+
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [bookId, setBookId] = useState('');
-  const [gender, setGender] = useState('Male');
-  const [category, setCategory] = useState('Domestic');
-  const [subsidy, setSubsidy] = useState(false);
   const [address, setAddress] = useState('');
   const [cylinders, setCylinders] = useState(1);
   const [cylinderType, setCylinderType] = useState('14.2kg');
-  const [customers, setCustomers] = useState([]);
+  const [category, setCategory] = useState('Domestic');
+  const [gender, setGender] = useState('Male');
+  const [subsidy, setSubsidy] = useState(false);
+  const [bookId, setBookId] = useState('');
 
-  const windowHeight = Dimensions.get('window').height;
-
-  useEffect(() => {
-    const q = query(collection(db, "customers"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleSubmit = async () => {
-    // Check if phone number already exists
-    const phoneExists = customers.some(customer => customer.phone === phone);
-    if (phoneExists) {
-      alert("A customer with this phone number already exists!");
+  const addCustomer = async () => {
+    // Validate required fields
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter customer name');
       return;
     }
 
-    // Check if book ID already exists
-    const bookIdExists = customers.some(customer => customer.bookId === bookId);
-    if (bookIdExists) {
-      alert("A customer with this book ID already exists!");
+    if (!phone.trim()) {
+      Alert.alert('Error', 'Please enter phone number');
       return;
     }
 
-    if (!name.trim() || !phone.trim() || !bookId.trim()) {
-      alert("Please fill in name, phone number, and book ID!");
+    // Validate phone number (exactly 10 digits)
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phone.trim())) {
+      Alert.alert('Error', 'Phone number must be exactly 10 digits');
       return;
     }
 
-    // Validate book ID format (16 alphanumeric characters)
-    if (!/^[A-Za-z0-9]{16}$/.test(bookId)) {
-      alert("Book ID must be exactly 16 alphanumeric characters!");
+    // Validate Book ID based on category
+    if (category === 'Domestic') {
+      if (!bookId.trim()) {
+        Alert.alert('Error', 'Book ID is required for domestic customers');
+        return;
+      }
+      
+      // Check if Book ID is unique for domestic customers
+      try {
+        const bookIdQuery = query(
+          collection(db, "customers"), 
+          where("bookId", "==", bookId.trim()),
+          where("category", "==", "Domestic")
+        );
+        const bookIdSnapshot = await getDocs(bookIdQuery);
+        
+        if (!bookIdSnapshot.empty) {
+          Alert.alert('Error', 'This Book ID is already used by another domestic customer');
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking Book ID uniqueness: ", error);
+        Alert.alert('Error', 'Failed to validate Book ID. Please try again.');
+        return;
+      }
+    }
+
+    // Check if phone number is unique
+    try {
+      const phoneQuery = query(
+        collection(db, "customers"), 
+        where("phone", "==", phone.trim())
+      );
+      const phoneSnapshot = await getDocs(phoneQuery);
+      
+      if (!phoneSnapshot.empty) {
+        Alert.alert('Error', 'This phone number is already registered');
+        return;
+      }
+    } catch (error) {
+      console.error("Error checking phone uniqueness: ", error);
+      Alert.alert('Error', 'Failed to validate phone number. Please try again.');
       return;
     }
 
     try {
       await addDoc(collection(db, "customers"), {
-        name: name,
-        phone: phone,
-        bookId: bookId,
-        gender: gender,
-        category: category,
-        subsidy: subsidy,
-        address: address,
-        cylinders: cylinders,
-        cylinderType: cylinderType,
-        payment: {
-          status: '',
-          amount: 0,
-          lastPaymentDate: null,
-        },
+        name: name.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        cylinders: parseInt(cylinders),
+        cylinderType,
+        category,
+        gender,
+        subsidy,
+        bookId: bookId.trim(),
         createdAt: new Date(),
+        payment: {
+          lastPaymentDate: null,
+          status: 'pending'
+        },
+        paymentHistory: []
       });
-      alert("Customer saved successfully!");
-      setName('');
-      setPhone('');
-      setBookId('');
-      setAddress('');
-      setCylinders(1);
-      setCylinderType('14.2kg');
-      setGender('Male');
-      setCategory('Domestic');
-      setSubsidy(false);
+      
+      Alert.alert('Success', 'Customer added successfully!');
+      navigation.goBack();
     } catch (error) {
-      alert("Error saving customer: " + error.message);
+      console.error("Error adding customer: ", error);
+      Alert.alert('Error', 'Failed to add customer. Please try again.');
     }
   };
 
+  const incrementCylinders = () => {
+    setCylinders(prev => prev + 1);
+  };
+
+  const decrementCylinders = () => {
+    setCylinders(prev => prev > 1 ? prev - 1 : 1);
+  };
+
   return (
-    <View style={styles.safeContainer}>
-      <ScrollView 
-        style={styles.container}
-        contentContainerStyle={styles.scrollContainer}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-        keyboardDismissMode="on-drag"        automaticallyAdjustContentInsets={false}
-        contentInsetAdjustmentBehavior="automatic"
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar 
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.surface}
+        translucent={true}
+      />
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={0}
       >
-        <View style={styles.buttonContainer}>
-          <Button 
-            title="View Customers List" 
-            onPress={() => navigation.navigate('CustomersList')}
-            color="#007AFF"
+        <ScrollView 
+          style={styles.scrollView} 
+          showsVerticalScrollIndicator={true}
+          contentContainerStyle={styles.scrollViewContent}
+        >
+        <View style={styles.form}>
+          {/* View Customers List Button */}
+          <TouchableOpacity 
+            style={[styles.viewCustomersButton, { backgroundColor: colors.primary }]}
+            onPress={() => navigation.navigate('CustomersListScreen')}
+          >
+            <Text style={styles.viewCustomersButtonText}>VIEW CUSTOMERS LIST</Text>
+          </TouchableOpacity>
+
+          {/* Full Name */}
+          <Text style={[styles.label, { color: colors.text }]}>Full Name</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={name}
+            onChangeText={setName}
+            placeholder="Enter full name"
+            placeholderTextColor={colors.textSecondary}
           />
-        </View>
 
-        <TextInput placeholder="Full Name" value={name} onChangeText={setName} style={styles.input} />
-        
-        <TextInput 
-          placeholder="Book ID (16 alphanumeric characters)" 
-          value={bookId} 
-          onChangeText={(text) => {
-            // Only allow alphanumeric characters and limit to 16 characters
-            const alphanumericOnly = text.replace(/[^A-Za-z0-9]/g, '');
-            if (alphanumericOnly.length <= 16) {
-              setBookId(alphanumericOnly.toUpperCase());
-            }
-          }}
-          style={styles.input} 
-          keyboardType="default"
-          maxLength={16}
-          autoCapitalize="characters"
-        />
-        
-        <Text style={styles.label}>Gender:</Text>
-        <Picker selectedValue={gender} onValueChange={setGender} style={styles.input}>
-          <Picker.Item label="Male" value="Male" />
-          <Picker.Item label="Female" value="Female" />
-          <Picker.Item label="Other" value="Other" />
-        </Picker>
+          {/* Book ID */}
+          <Text style={[styles.label, { color: colors.text }]}>
+            Book ID (16 alphanumeric characters)
+            {category === 'Domestic' && <Text style={[styles.requiredAsterisk, { color: colors.error || '#FF3B30' }]}> *</Text>}
+            {category === 'Commercial' && <Text style={[styles.optionalText, { color: colors.textSecondary }]}> (Optional)</Text>}
+          </Text>
+          <TextInput
+            style={[styles.input, { 
+              backgroundColor: colors.surface, 
+              color: colors.text, 
+              borderColor: category === 'Domestic' ? (bookId.trim() ? colors.border : colors.error || '#FF3B30') : colors.border 
+            }]}
+            value={bookId}
+            onChangeText={setBookId}
+            placeholder={category === 'Domestic' ? "Enter book ID (Required)" : "Enter book ID (Optional)"}
+            placeholderTextColor={colors.textSecondary}
+            maxLength={16}
+          />
 
-        <Text style={styles.label}>Category:</Text>
-        <Picker selectedValue={category} onValueChange={setCategory} style={styles.input}>
-          <Picker.Item label="Domestic" value="Domestic" />
-          <Picker.Item label="Commercial" value="Commercial" />
-        </Picker>
-
-        <View style={styles.switchContainer}>
-          <Text style={styles.label}>Subsidy Applicable?</Text>
-          <Switch value={subsidy} onValueChange={setSubsidy} />
-        </View>
-
-        <TextInput placeholder="Phone" value={phone} onChangeText={setPhone} style={styles.input} keyboardType="phone-pad" />
-        
-        <TextInput placeholder="Address" value={address} onChangeText={setAddress} style={styles.input} multiline />
-        
-        <Text style={styles.label}>Number of Cylinders:</Text>
-        <View style={styles.counterContainer}>
-          <TouchableOpacity 
-            style={styles.counterButton} 
-            onPress={() => setCylinders(Math.max(0, cylinders - 1))}
-          >
-            <Text style={styles.counterButtonText}>-</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.counterDisplay}>
-            <Text style={styles.counterText}>{cylinders}</Text>
+          {/* Gender */}
+          <Text style={[styles.label, { color: colors.text }]}>Gender:</Text>
+          <View style={[styles.pickerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={gender}
+              onValueChange={setGender}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="Male" value="Male" />
+              <Picker.Item label="Female" value="Female" />
+              <Picker.Item label="Other" value="Other" />
+            </Picker>
           </View>
-          
+
+          {/* Category */}
+          <Text style={[styles.label, { color: colors.text }]}>Category:</Text>
+          <View style={[styles.pickerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={category}
+              onValueChange={setCategory}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="Domestic" value="Domestic" />
+              <Picker.Item label="Commercial" value="Commercial" />
+            </Picker>
+          </View>
+
+          {/* Subsidy Applicable */}
+          <View style={[styles.subsidyContainer, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <Text style={[styles.subsidyLabel, { color: colors.text }]}>Subsidy Applicable?</Text>
+            <Switch
+              value={subsidy}
+              onValueChange={setSubsidy}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={subsidy ? '#ffffff' : '#f4f3f4'}
+              ios_backgroundColor={colors.border}
+            />
+          </View>
+
+          {/* Phone */}
+          <Text style={[styles.label, { color: colors.text }]}>
+            Phone number📞<Text style={[styles.requiredAsterisk, { color: colors.error || '#FF3B30' }]}>*</Text>
+            
+          </Text>
+          <TextInput
+            style={[styles.input, { 
+              backgroundColor: colors.surface, 
+              color: colors.text, 
+              borderColor: phone.trim() && !/^\d{10}$/.test(phone.trim()) ? colors.error || '#FF3B30' : colors.border 
+            }]}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Enter your phone number"
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="phone-pad"
+            maxLength={10}
+          />
+
+          {/* Address */}
+          <Text style={[styles.label, { color: colors.text }]}>Address📍</Text>
+          <TextInput
+            style={[styles.input, styles.addressInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={address}
+            onChangeText={setAddress}
+            placeholder="Enter address"
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            numberOfLines={3}
+          />
+
+          {/* Number of Cylinders */}
+          <Text style={[styles.label, { color: colors.text }]}>Number of Cylinders:</Text>
+          <View style={styles.cylinderCountContainer}>
+            <TouchableOpacity 
+              style={[styles.cylinderButton, { backgroundColor: colors.primary }]}
+              onPress={decrementCylinders}
+            >
+              <Text style={styles.cylinderButtonText}>−</Text>
+            </TouchableOpacity>
+            <View style={[styles.cylinderCountDisplay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.cylinderCountText, { color: colors.text }]}>{cylinders}</Text>
+            </View>
+            <TouchableOpacity 
+              style={[styles.cylinderButton, { backgroundColor: colors.primary }]}
+              onPress={incrementCylinders}
+            >
+              <Text style={styles.cylinderButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Cylinder Type */}
+          <Text style={[styles.label, { color: colors.text }]}>Cylinder Type:</Text>
+          <View style={[styles.pickerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={cylinderType}
+              onValueChange={setCylinderType}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="14.2kg" value="14.2kg" />
+              <Picker.Item label="19kg" value="19kg" />
+              <Picker.Item label="5kg" value="5kg" />
+            </Picker>
+          </View>
+
+          {/* Save Customer Button */}
           <TouchableOpacity 
-            style={styles.counterButton}            onPress={() => setCylinders(cylinders + 1)}
+            style={[styles.saveButton, { backgroundColor: colors.primary }]}
+            onPress={addCustomer}
           >
-            <Text style={styles.counterButtonText}>+</Text>
+            <Text style={styles.saveButtonText}>SAVE CUSTOMER</Text>
           </TouchableOpacity>
         </View>
-
-        <Text style={styles.label}>Cylinder Type:</Text>
-        <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={cylinderType}
-            onValueChange={setCylinderType}
-            style={styles.picker}
-          >
-            <Picker.Item label="14.2kg" value="14.2kg" />
-            <Picker.Item label="5kg" value="5kg" />
-            <Picker.Item label="19kg" value="19kg" />
-          </Picker>
-        </View>
-
-        <Button title="Save Customer" onPress={handleSubmit} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
-// Edit Customer Screen Component
-function EditCustomerScreen({ route, navigation }) {
+// Edit Customer Screen Component  
+function EditCustomerScreen({ navigation, route }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  
+  const getColors = (isDark) => ({
+    background: isDark ? '#121212' : '#ffffff',
+    surface: isDark ? '#1e1e1e' : '#f8f9fa',
+    card: isDark ? '#2d2d2d' : '#ffffff',
+    text: isDark ? '#ffffff' : '#000000',
+    textSecondary: isDark ? '#b0b0b0' : '#666666',
+    border: isDark ? '#404040' : '#e0e0e0',
+    primary: isDark ? '#4CAF50' : '#28a745',
+    danger: isDark ? '#f44336' : '#dc3545',
+    warning: isDark ? '#ff9800' : '#ffc107'
+  });
+
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
+
   const { customer } = route.params;
   
   const [name, setName] = useState(customer.name || '');
   const [phone, setPhone] = useState(customer.phone || '');
-  const [gender, setGender] = useState(customer.gender || 'Male');
+  const [address, setAddress] = useState(customer.address || '');
+  const [cylinders, setCylinders] = useState(customer.cylinders?.toString() || '1');
+  const [cylinderType, setCylinderType] = useState(customer.cylinderType || '14.2kg');
   const [category, setCategory] = useState(customer.category || 'Domestic');
   const [subsidy, setSubsidy] = useState(customer.subsidy || false);
-  const [address, setAddress] = useState(customer.address || '');
-  const [cylinders, setCylinders] = useState(customer.cylinders || 1);
-  const [cylinderType, setCylinderType] = useState(customer.cylinderType || '14.2kg');
+  const [bookId, setBookId] = useState(customer.bookId || '');
 
-  const handleUpdate = async () => {
-    if (!name.trim() || !phone.trim()) {
-      alert("Please fill in both name and phone number!");
+  const updateCustomer = async () => {
+    // Validate required fields
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter customer name');
+      return;
+    }
+
+    if (!phone.trim()) {
+      Alert.alert('Error', 'Please enter phone number');
+      return;
+    }
+
+    // Validate phone number (exactly 10 digits)
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phone.trim())) {
+      Alert.alert('Error', 'Phone number must be exactly 10 digits');
+      return;
+    }
+
+    // Validate Book ID based on category
+    if (category === 'Domestic') {
+      if (!bookId.trim()) {
+        Alert.alert('Error', 'Book ID is required for domestic customers');
+        return;
+      }
+      
+      // Check if Book ID is unique for domestic customers (excluding current customer)
+      try {
+        const bookIdQuery = query(
+          collection(db, "customers"), 
+          where("bookId", "==", bookId.trim()),
+          where("category", "==", "Domestic")
+        );
+        const bookIdSnapshot = await getDocs(bookIdQuery);
+        
+        // Check if any other customer has this Book ID
+        const duplicateCustomer = bookIdSnapshot.docs.find(doc => doc.id !== customer.id);
+        if (duplicateCustomer) {
+          Alert.alert('Error', 'This Book ID is already used by another domestic customer');
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking Book ID uniqueness: ", error);
+        Alert.alert('Error', 'Failed to validate Book ID. Please try again.');
+        return;
+      }
+    }
+
+    // Check if phone number is unique (excluding current customer)
+    try {
+      const phoneQuery = query(
+        collection(db, "customers"), 
+        where("phone", "==", phone.trim())
+      );
+      const phoneSnapshot = await getDocs(phoneQuery);
+      
+      // Check if any other customer has this phone number
+      const duplicateCustomer = phoneSnapshot.docs.find(doc => doc.id !== customer.id);
+      if (duplicateCustomer) {
+        Alert.alert('Error', 'This phone number is already registered to another customer');
+        return;
+      }
+    } catch (error) {
+      console.error("Error checking phone uniqueness: ", error);
+      Alert.alert('Error', 'Failed to validate phone number. Please try again.');
       return;
     }
 
     try {
       const customerRef = doc(db, "customers", customer.id);
       await updateDoc(customerRef, {
-        name: name,
-        phone: phone,
-        gender: gender,
-        category: category,
-        subsidy: subsidy,
-        address: address,
-        cylinders: cylinders,
-        cylinderType: cylinderType,
-        updatedAt: new Date(),
+        name: name.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        cylinders: parseInt(cylinders),
+        cylinderType,
+        category,
+        subsidy,
+        bookId: bookId.trim(),
+        updatedAt: new Date()
       });
-      alert("Customer updated successfully!");
+      
+      Alert.alert('Success', 'Customer updated successfully!');
       navigation.goBack();
     } catch (error) {
-      alert("Error updating customer: " + error.message);
+      console.error("Error updating customer: ", error);
+      Alert.alert('Error', 'Failed to update customer. Please try again.');
     }
   };
 
   return (
-    <View style={styles.safeContainer}>
-      <ScrollView 
-        style={styles.container}
-        contentContainerStyle={styles.scrollContainer}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-        keyboardDismissMode="on-drag"
-        automaticallyAdjustContentInsets={false}
-        contentInsetAdjustmentBehavior="automatic"
-      >
-        <View style={styles.buttonContainer}>
-          <Button 
-            title="Back to List" 
-            onPress={() => navigation.goBack()}
-            color="#6c757d"
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      <StatusBar 
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.surface}
+        translucent={true}
+      />
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.form}>
+          <Text style={[styles.label, { color: colors.text }]}>Name *</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={name}
+            onChangeText={setName}
+            placeholder="Enter customer name"
+            placeholderTextColor={colors.textSecondary}
           />
-        </View>
 
-        <TextInput placeholder="Full Name" value={name} onChangeText={setName} style={styles.input} />
-        
-        <Text style={styles.label}>Gender:</Text>
-        <Picker selectedValue={gender} onValueChange={setGender} style={styles.input}>
-          <Picker.Item label="Male" value="Male" />
-          <Picker.Item label="Female" value="Female" />
-          <Picker.Item label="Other" value="Other" />
-        </Picker>
+          <Text style={[styles.label, { color: colors.text }]}>Phone *</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Enter phone number"
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="phone-pad"
+          />
 
-        <Text style={styles.label}>Category:</Text>
-        <Picker selectedValue={category} onValueChange={setCategory} style={styles.input}>
-          <Picker.Item label="Domestic" value="Domestic" />
-          <Picker.Item label="Commercial" value="Commercial" />
-        </Picker>
+          <Text style={[styles.label, { color: colors.text }]}>Address</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={address}
+            onChangeText={setAddress}
+            placeholder="Enter address"
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            numberOfLines={3}
+          />
 
-        <View style={styles.switchContainer}>
-          <Text style={styles.label}>Subsidy Applicable?</Text>
-          <Switch value={subsidy} onValueChange={setSubsidy} />
-        </View>
+          <Text style={[styles.label, { color: colors.text }]}>Book ID</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={bookId}
+            onChangeText={setBookId}
+            placeholder="Enter book ID (optional)"
+            placeholderTextColor={colors.textSecondary}
+          />
 
-        <TextInput placeholder="Phone" value={phone} onChangeText={setPhone} style={styles.input} keyboardType="phone-pad" />
-        
-        <TextInput placeholder="Address" value={address} onChangeText={setAddress} style={styles.input} multiline />
-        
-        <Text style={styles.label}>Number of Cylinders:</Text>
-        <View style={styles.counterContainer}>
-          <TouchableOpacity 
-            style={styles.counterButton} 
-            onPress={() => setCylinders(Math.max(0, cylinders - 1))}
-          >
-            <Text style={styles.counterButtonText}>-</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.counterDisplay}>
-            <Text style={styles.counterText}>{cylinders}</Text>
+          <Text style={[styles.label, { color: colors.text }]}>Category</Text>
+          <View style={[styles.pickerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={category}
+              onValueChange={setCategory}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="Domestic" value="Domestic" />
+              <Picker.Item label="Commercial" value="Commercial" />
+            </Picker>
           </View>
-          
+
+          <Text style={[styles.label, { color: colors.text }]}>Number of Cylinders</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+            value={cylinders}
+            onChangeText={setCylinders}
+            placeholder="Enter number of cylinders"
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="numeric"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>Cylinder Type</Text>
+          <View style={[styles.pickerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Picker
+              selectedValue={cylinderType}
+              onValueChange={setCylinderType}
+              style={[styles.picker, { color: colors.text }]}
+            >
+              <Picker.Item label="14.2kg" value="14.2kg" />
+              <Picker.Item label="19kg" value="19kg" />
+              <Picker.Item label="5kg" value="5kg" />
+            </Picker>
+          </View>
+
+          <View style={styles.switchContainer}>
+            <Text style={[styles.label, { color: colors.text }]}>Subsidy Eligible</Text>
+            <Switch
+              value={subsidy}
+              onValueChange={setSubsidy}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={subsidy ? colors.surface : colors.textSecondary}
+            />
+          </View>
+
           <TouchableOpacity 
-            style={styles.counterButton} 
-            onPress={() => setCylinders(cylinders + 1)}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
+            onPress={updateCustomer}
           >
-            <Text style={styles.counterButtonText}>+</Text>
+            <Text style={styles.addButtonText}>Update Customer</Text>
           </TouchableOpacity>
         </View>
-        
-        <Text style={styles.label}>Cylinder Type:</Text>
-        <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={cylinderType}
-            onValueChange={setCylinderType}
-            style={styles.picker}
-          >
-            <Picker.Item label="14.2kg" value="14.2kg" />
-            <Picker.Item label="5kg" value="5kg" />
-            <Picker.Item label="19kg" value="19kg" />
-          </Picker>
-        </View>
-        
-        <Button title="Update Customer" onPress={handleUpdate} color="#28a745" />
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-// Customers List Screen Component
-function CustomersListScreen({ navigation, route }) {
-  const [customers, setCustomers] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
-  const { filter } = route.params || {};
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
-  // Pricing constants (should match BookingScreen)
-  const PRICE_PER_CYLINDER = 1150;
-  const SERVICE_FEES = {
-    'Pickup': 50,
-    'Drop': 50,
-    'Both': 70
-  };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
 
-  useEffect(() => {
-    const q = query(collection(db, "customers"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
-    return unsubscribe;
-  }, []);
+  componentDidCatch(error, errorInfo) {
+    console.error('App crashed:', error, errorInfo);
+  }
 
-  // Function to fix "FULL" amounts in payment history
-  const fixFullAmountsInCustomerHistory = async (customer) => {
-    if (!customer.paymentHistory) return customer;
-    
-    try {
-      // Check if there are any "FULL" amounts that need fixing
-      const hasFullAmounts = customer.paymentHistory.some(transaction => transaction.amount === 'FULL');
-      
-      if (hasFullAmounts) {
-        const updatedHistory = customer.paymentHistory.map(transaction => {
-          if (transaction.amount === 'FULL' && transaction.paymentStatus === 'Paid') {
-            // For fixed calculations, we'll use a default of 1 cylinder + pickup service
-            // In reality, this would need booking details, but we can provide a reasonable default
-            const cylinderCost = 1 * PRICE_PER_CYLINDER; // Default to 1 cylinder
-            const serviceFee = SERVICE_FEES['Pickup']; // Default to pickup service
-            return {
-              ...transaction,
-              amount: (cylinderCost + serviceFee).toString()
-            };
-          }
-          return transaction;
-        });
-        
-        // Update the customer record in the database
-        const customerRef = doc(db, "customers", customer.id);
-        await updateDoc(customerRef, {
-          paymentHistory: updatedHistory
-        });
-        
-        // Return updated customer for immediate display
-        return {
-          ...customer,
-          paymentHistory: updatedHistory
-        };
-      }
-    } catch (error) {
-      console.error("Error fixing FULL amounts:", error);
-    }
-    
-    return customer;
-  };
-
-  // Apply search filter first, then category filter
-  const getFilteredCustomers = () => {
-    let filtered = customers.filter(c =>
-      c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.phone?.includes(searchTerm)
-    );
-
-    // Apply dashboard filters
-    if (filter === 'domestic') {
-      filtered = filtered.filter(customer => customer.category === 'Domestic');
-    } else if (filter === 'commercial') {
-      filtered = filtered.filter(customer => customer.category === 'Commercial');
-    } else if (filter === 'subsidy') {
-      filtered = filtered.filter(customer => customer.subsidy === true);
-    } else if (filter === 'today') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(customer => {
-        const createdAt = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
-        return createdAt >= today;
-      });
-    }
-
-    return filtered;
-  };
-
-  const getFilterTitle = () => {
-    switch (filter) {
-      case 'domestic': return '🏠 Showing Domestic Customers Only';
-      case 'commercial': return '🏢 Showing Commercial Customers Only';
-      case 'subsidy': return '💰 Showing Subsidy Customers Only';
-      case 'today': return '📅 Showing Today\'s Registrations Only';
-      default: return '';
-    }
-  };
-
-  const getFilterBannerStyle = () => {
-    switch (filter) {
-      case 'domestic': return { backgroundColor: '#e3f2fd', borderColor: '#2196f3' };
-      case 'commercial': return { backgroundColor: '#fce4ec', borderColor: '#e91e63' };
-      case 'subsidy': return { backgroundColor: '#f1f8e9', borderColor: '#8bc34a' };
-      case 'today': return { backgroundColor: '#f3e5f5', borderColor: '#9c27b0' };
-      default: return { backgroundColor: '#fff3cd', borderColor: '#ffeaa7' };
-    }
-  };
-
-  const filteredCustomers = getFilteredCustomers();
-
-  return (
-    <View style={styles.container}>
-      {filter && (
-        <View style={[styles.filterBanner, getFilterBannerStyle()]}>
-          <View style={styles.filterTextContainer}>
-            <Text style={styles.filterText}>{getFilterTitle()}</Text>
-            <Text style={styles.filterCount}>({filteredCustomers.length} found)</Text>
-          </View>
-          <TouchableOpacity 
-            style={styles.clearFilterButton}
-            onPress={() => navigation.setParams({ filter: null })}
-          >
-            <Text style={styles.clearFilterText}>Show All</Text>
-          </TouchableOpacity>
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 18, marginBottom: 10, textAlign: 'center' }}>
+            Something went wrong!
+          </Text>
+          <Text style={{ color: '#666', textAlign: 'center' }}>
+            {this.state.error?.message || 'An unexpected error occurred'}
+          </Text>
         </View>
-      )}
-
-      <View style={styles.buttonContainer}>
-        <Button 
-          title="Add New Customer" 
-          onPress={() => navigation.navigate('AddCustomer')}
-          color="#28a745"
-        />
-      </View>
-      
-      <View style={styles.buttonContainer}>
-        <Button 
-          title="Export Customer Data" 
-          onPress={() => navigation.navigate('Export')}
-          color="#17a2b8"
-        />
-      </View>
-
-      <TextInput
-        placeholder="Search by name or phone..."
-        value={searchTerm}
-        onChangeText={setSearchTerm}
-        style={styles.input}
-      />
-
-      <Text style={styles.title}>
-        Customers ({filteredCustomers.length})
-        {filter && ` - ${getFilterTitle().replace(/📋|✅|⚡|🏠|🏢|💰|📅/g, '').replace('Showing', '').replace('Only', '').trim()}`}
-      </Text>
-
-      <FlatList
-        data={filteredCustomers}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity 
-            style={styles.customerItem}
-            onPress={async () => {
-              // Fix any "FULL" amounts before showing the modal
-              const updatedCustomer = await fixFullAmountsInCustomerHistory(item);
-              setSelectedCustomer(updatedCustomer);
-              setModalVisible(true);
-            }}
-          >
-            <Text style={styles.customerName}>{item.name}</Text>
-            <Text style={styles.customerDetails}>Phone: {item.phone}</Text>
-            {item.bookId && <Text style={styles.customerDetails}>Book ID: {item.bookId}</Text>}
-            <Text style={styles.customerDetails}>Gender: {item.gender}</Text>
-            <Text style={styles.customerDetails}>Category: {item.category || 'Not Set'}</Text>
-            <Text style={styles.customerDetails}>Address: {item.address}</Text>
-            <Text style={styles.customerDetails}>Cylinders: {item.cylinders}</Text>
-            <Text style={styles.customerDetails}>
-              Subsidy: {item.subsidy ? 'Yes' : 'No'}
-            </Text>
-            <Text style={styles.paymentDate}>
-              Last Payment: {item.payment?.lastPaymentDate ? 
-                new Date(item.payment.lastPaymentDate.seconds ? 
-                  item.payment.lastPaymentDate.toDate() : 
-                  item.payment.lastPaymentDate
-                ).toLocaleDateString() : 
-                'No payment recorded'}
-            </Text>
-            <Text style={styles.paymentHistory}>
-              Payment History: {item.paymentHistory ? 
-                `${item.paymentHistory.length} transaction${item.paymentHistory.length !== 1 ? 's' : ''}` : 
-                'No transactions'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      />
-      
-      {/* Customer Details Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Customer Details</Text>
-              <View style={styles.headerButtons}>
-                <TouchableOpacity 
-                  style={styles.editButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    navigation.navigate('EditCustomer', { customer: selectedCustomer });
-                  }}
-                >
-                  <Text style={styles.editButtonText}>✏️ Edit</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.closeButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    setShowPaymentHistory(false);
-                  }}
-                >
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            
-            {selectedCustomer && (
-              <ScrollView style={styles.modalContent}>
-                <View style={styles.detailSection}>
-                  <Text style={styles.sectionTitle}>📋 Basic Information</Text>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Name:</Text>
-                    <Text style={styles.detailValue}>{selectedCustomer.name}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Phone:</Text>
-                    <Text style={styles.detailValue}>{selectedCustomer.phone}</Text>
-                  </View>
-                  {selectedCustomer.bookId && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Book ID:</Text>
-                      <Text style={[styles.detailValue, styles.bookIdText]}>{selectedCustomer.bookId}</Text>
-                    </View>
-                  )}
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Gender:</Text>
-                    <Text style={styles.detailValue}>{selectedCustomer.gender}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Category:</Text>
-                    <Text style={styles.detailValue}>{selectedCustomer.category || 'Not Set'}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Cylinders:</Text>
-                    <Text style={styles.detailValue}>{selectedCustomer.cylinders || 0}</Text>
-                  </View>
-                  {selectedCustomer.address && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Address:</Text>
-                      <Text style={styles.detailValue}>{selectedCustomer.address}</Text>
-                    </View>
-                  )}
-                  {selectedCustomer.subsidy && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Subsidy:</Text>
-                      <Text style={[styles.detailValue, styles.subsidyValue]}>💰 Applicable</Text>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.detailSection}>
-                  <Text style={styles.sectionTitle}>💳 Payment Information</Text>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Last Payment:</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedCustomer.payment?.lastPaymentDate ? 
-                        new Date(selectedCustomer.payment.lastPaymentDate.seconds ? 
-                          selectedCustomer.payment.lastPaymentDate.toDate() : 
-                          selectedCustomer.payment.lastPaymentDate
-                        ).toLocaleDateString() : 
-                        'No payment recorded'}
-                    </Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.detailRow}
-                    onPress={() => setShowPaymentHistory(!showPaymentHistory)}
-                  >
-                    <Text style={styles.detailLabel}>Payment History:</Text>
-                    <Text style={[styles.detailValue, styles.clickableText]}>
-                      {selectedCustomer.paymentHistory ? 
-                        `${selectedCustomer.paymentHistory.length} transaction${selectedCustomer.paymentHistory.length !== 1 ? 's' : ''} ${showPaymentHistory ? '▼' : '▶'}` : 
-                        'No transactions'}
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  {showPaymentHistory && selectedCustomer.paymentHistory && selectedCustomer.paymentHistory.length > 0 && (
-                    <View style={styles.paymentHistoryExpanded}>
-                      <Text style={styles.historyTitle}>📋 Transaction History:</Text>
-                      {selectedCustomer.paymentHistory
-                        .sort((a, b) => new Date(b.date) - new Date(a.date)) // Sort by date, newest first
-                        .map((transaction, index) => {
-                          // Determine display status based on payment and delivery status
-                          let displayStatus = transaction.status;
-                          if (!displayStatus) {
-                            // For older records that might not have the new status field
-                            if (transaction.paymentStatus === 'Paid' && transaction.deliveryStatus === 'Delivered') {
-                              displayStatus = 'Completed';
-                            } else if (transaction.paymentStatus === 'Paid') {
-                              displayStatus = 'Paid - Pending Delivery';
-                            } else if (transaction.paymentStatus === 'Partial') {
-                              displayStatus = 'Partial Payment';
-                            } else {
-                              displayStatus = 'Pending';
-                            }
-                          }
-                          
-                          return (
-                            <View key={index} style={styles.transactionItem}>
-                              <View style={styles.transactionRow}>
-                                <Text style={styles.transactionDate}>
-                                  {new Date(transaction.date.seconds ? 
-                                    transaction.date.toDate() : 
-                                    transaction.date
-                                  ).toLocaleDateString()}
-                                </Text>
-                                <Text style={styles.transactionAmount}>
-                                  ₹{transaction.amount === 'FULL' ? (1 * PRICE_PER_CYLINDER + SERVICE_FEES['Pickup']) : (transaction.amount || 'N/A')}
-                                </Text>
-                              </View>
-                              <Text style={[
-                                styles.transactionStatus,
-                                displayStatus === 'Completed' && styles.completedStatus,
-                                displayStatus === 'Partial Payment' && styles.partialStatus
-                              ]}>
-                                Status: {displayStatus}
-                              </Text>
-                              {transaction.paymentStatus && transaction.deliveryStatus && (
-                                <Text style={styles.transactionDetails}>
-                                  Payment: {transaction.paymentStatus} • Delivery: {transaction.deliveryStatus}
-                                </Text>
-                              )}
-                              {transaction.bookingId && (
-                                <Text style={styles.transactionBooking}>
-                                  Booking: {transaction.bookingId.substring(0, 8)}...
-                                </Text>
-                              )}
-                            </View>
-                          );
-                        })
-                      }
-                    </View>
-                  )}
-                </View>
-
-                {selectedCustomer.createdAt && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.sectionTitle}>📅 Registration Info</Text>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Registered:</Text>
-                      <Text style={styles.detailValue}>
-                        {new Date(selectedCustomer.createdAt.seconds ? 
-                          selectedCustomer.createdAt.toDate() : 
-                          selectedCustomer.createdAt
-                        ).toLocaleDateString()}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity 
-                    style={styles.bookLargeButton}
-                    onPress={() => {
-                      setModalVisible(false);
-                      navigation.navigate('BookingScreen', { customerId: selectedCustomer.id });
-                    }}
-                  >
-                    <Text style={styles.bookLargeButtonText}>📋 Book Cylinder</Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
+      );
+    }
+    return this.props.children;
+  }
 }
 
-export default function App() {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName="Dashboard">
-        <Stack.Screen 
-          name="Dashboard" 
-          component={DashboardScreen} 
-          options={({ navigation }) => ({
-            title: 'LPG Map',
-            headerRight: () => (
-              <TouchableOpacity 
-                onPress={() => navigation.navigate('Inventory')}
-                style={{
-                  marginRight: 15,
-                  backgroundColor: '#007AFF',
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 6,
-                }}
-              >
-                <Text style={{
-                  color: 'white',
-                  fontSize: 14,
-                  fontWeight: '600',
-                }}>
-                  📦 Inventory
-                </Text>
-              </TouchableOpacity>
-            ),
-          })}
-        />
-        <Stack.Screen 
-          name="AddCustomer" 
-          component={AddCustomerScreen} 
-          options={{ title: 'Add New Customer' }}
-        />
-        <Stack.Screen 
-          name="CustomersList" 
-          component={CustomersListScreen} 
-          options={{ title: 'Customers List' }}
-        />
-        <Stack.Screen 
-          name="EditCustomer" 
-          component={EditCustomerScreen} 
-          options={{ title: 'Edit Customer' }}
-        />
-        <Stack.Screen 
-          name="Export" 
-          component={ExportScreen}
-          options={{ title: 'Export Data' }}
-        />
-        <Stack.Screen 
-          name="BookingScreen" 
-          component={BookingScreen}
-          options={{ title: 'Book Cylinder' }}
-        />
-        <Stack.Screen 
-          name="BookingsList" 
-          component={BookingsListScreen}
-          options={{ title: 'Bookings List' }}
-        />
-        <Stack.Screen 
-          name="Inventory" 
-          component={InventoryScreen}
-          options={{ title: 'Inventory Management' }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-}
-
-
-const styles = StyleSheet.create({
-  safeContainer: {
+// Styles function for the form screens
+const createStyles = (colors) => StyleSheet.create({
+  container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  container: { 
-    flex: 1, 
+  scrollView: {
+    flex: 1,
   },
-  scrollContainer: {
+  scrollViewContent: {
     flexGrow: 1,
-    padding: 20,
-    paddingBottom: 100,
+    paddingBottom: 20,
   },
-  title: { 
-    fontSize: 20, 
-    fontWeight: 'bold', 
-    marginBottom: 20,
-    textAlign: 'center',
-    color: '#333'
+  form: {
+    padding: 12,
+    paddingTop: 8,
   },
-  input: { 
-    borderWidth: 1, 
-    borderColor: '#ccc', 
-    padding: 12, 
-    marginBottom: 15, 
+  viewCustomersButton: {
+    padding: 10,
     borderRadius: 8,
-    backgroundColor: '#fff',
-    fontSize: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  viewCustomersButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 5,
-    marginTop: 10,
-    color: '#333'
+    marginBottom: 6,
+    marginTop: 8,
   },
-  switchContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    marginBottom: 15,
-    padding: 10,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+  input: {
     borderWidth: 1,
-    borderColor: '#ccc'
-  },
-  buttonContainer: {
-    marginBottom: 20,
-  },
-  customerItem: {
-    padding: 15,
+    borderRadius: 6,
+    padding: 12,
+    fontSize: 16,
     marginBottom: 10,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    minHeight: 45,
+    textAlignVertical: 'center',
   },
-  customerName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  customerDetails: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 3,
-  },
-  counterContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 15,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 5,
-  },
-  counterButton: {
-    backgroundColor: '#007AFF',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 10,
-  },
-  counterButtonText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  counterDisplay: {
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  counterText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+  addressInput: {
+    height: 70,
+    textAlignVertical: 'top',
+    paddingTop: 12,
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    marginBottom: 15,
+    borderRadius: 6,
+    marginBottom: 10,
+    minHeight: 45,
+    justifyContent: 'center',
   },
   picker: {
-    height: 50,
+    height: 53,
+    marginVertical: 0,
   },
-  filterBanner: {
-    backgroundColor: '#fff3cd',
-    padding: 15,
+  subsidyContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 10,
-    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: '#ffeaa7',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  filterTextContainer: {
-    flex: 1,
-  },
-  filterText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 2,
-  },
-  filterCount: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  clearFilterButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-  },
-  clearFilterText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  paymentDate: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  paymentHistory: {
-    fontSize: 11,
-    color: '#007AFF',
-    marginTop: 1,
-    fontWeight: '500',
-  },
-  
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContainer: {
-    backgroundColor: 'white',
-    borderRadius: 15,
-    width: '90%',
-    maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  editButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-    marginRight: 10,
-  },
-  editButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  closeButtonText: {
-    fontSize: 20,
-    color: '#999',
-    fontWeight: 'bold',
-  },
-  modalContent: {
-    padding: 20,
-  },
-  detailSection: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-    paddingBottom: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 5,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#f5f5f5',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#333',
-    flex: 2,
-    textAlign: 'right',
-  },
-  clickableText: {
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  subsidyValue: {
-    color: '#34C759',
-    fontWeight: 'bold',
-  },
-  bookIdText: {
-    fontFamily: 'monospace',
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  paymentHistoryExpanded: {
-    marginTop: 10,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 10,
-  },
-  historyTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  transactionItem: {
-    backgroundColor: 'white',
     borderRadius: 6,
-    padding: 10,
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#007AFF',
+    minHeight: 45,
   },
-  transactionRow: {
+  subsidyLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  cylinderCountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  cylinderButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cylinderButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  cylinderCountDisplay: {
+    marginHorizontal: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 6,
+    minWidth: 45,
+    alignItems: 'center',
+  },
+  cylinderCountText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  switchContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 20,
+    paddingVertical: 8,
   },
-  transactionDate: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '500',
-  },
-  transactionAmount: {
-    fontSize: 13,
-    color: '#007AFF',
-    fontWeight: 'bold',
-  },
-  transactionStatus: {
-    fontSize: 11,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  completedStatus: {
-    color: '#34C759',
-    fontWeight: 'bold',
-  },
-  partialStatus: {
-    color: '#FF9500',
-    fontWeight: 'bold',
-  },
-  transactionBooking: {
-    fontSize: 10,
-    color: '#999',
-    marginTop: 2,
-  },
-  transactionDetails: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 1,
-    fontStyle: 'italic',
-  },
-  actionButtons: {
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  bookLargeButton: {
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 10,
+  addButton: {
+    padding: 12,
+    borderRadius: 8,
     alignItems: 'center',
+    marginTop: 16,
   },
-  bookLargeButtonText: {
+  addButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  saveButton: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  requiredAsterisk: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  optionalText: {
+    fontSize: 12,
+    fontWeight: 'normal',
+    fontStyle: 'italic',
   },
 });
+
+// Main App Component
+export default function App() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
+  return (
+    <ErrorBoundary>
+      <StatusBar 
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={isDark ? '#1a1a1a' : '#f8f9fa'}
+        translucent={true}
+      />
+      <NavigationContainer>
+        <Stack.Navigator 
+          initialRouteName="Dashboard"
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
+              height: 60, // Reduced global header height
+              elevation: 2,
+              shadowOpacity: 0.1,
+            },
+            headerTintColor: isDark ? '#ffffff' : '#000000',
+            headerTitleStyle: {
+              fontWeight: 'bold',
+              fontSize: 20,
+            },
+            headerStatusBarHeight: 0, // Remove extra status bar height
+            headerTitleContainerStyle: {
+              paddingTop: 0,
+              paddingBottom: 0,
+            },
+            headerLeftContainerStyle: {
+              paddingLeft: 8,
+            },
+            headerRightContainerStyle: {
+              paddingRight: 8,
+            },
+            headerBackTitleVisible: true, // Show back title for more space
+            headerTitleAlign: 'center',
+          }}
+        >
+          <Stack.Screen 
+            name="Dashboard" 
+            component={DashboardScreen}
+            options={{
+              title: "LPG MAP📍",
+              headerShown: true,
+            }}
+          />
+          <Stack.Screen 
+            name="CustomersListScreen" 
+            component={CustomersListScreen}
+            options={{
+              title: "Customers",
+            }}
+          />
+          <Stack.Screen 
+            name="BookingsListScreen" 
+            component={BookingsListScreen}
+            options={{
+              title: "Today's orders",
+            }}
+          />
+          <Stack.Screen 
+            name="InventoryScreen" 
+            component={InventoryScreen}
+            options={{
+              title: "Inventory Status",
+            }}
+          />
+          <Stack.Screen 
+            name="AddCustomer" 
+            component={AddCustomerScreen}
+            options={{
+              title: "Add New Customer",
+              headerStyle: {
+                backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
+                height: 60, // Same as global height
+                elevation: 2,
+                shadowOpacity: 0.1,
+              },
+              headerTitleStyle: {
+                fontWeight: 'bold',
+                fontSize: 16,
+              },
+            }}
+          />
+          <Stack.Screen 
+            name="EditCustomer" 
+            component={EditCustomerScreen}
+            options={{
+              title: "Edit Customer",
+            }}
+          />
+          <Stack.Screen 
+            name="BookingScreen" 
+            component={BookingScreen}
+            options={{
+              title: "Book Cylinder",
+            }}
+          />
+          <Stack.Screen 
+            name="ExportScreen" 
+            component={ExportScreen}
+            options={{
+              title: "Export Data",
+            }}
+          />
+          <Stack.Screen 
+            name="UpdateCylinders" 
+            component={UpdateCylindersScreen}
+            options={{
+              title: "Update Cylinders",
+            }}
+          />
+          <Stack.Screen 
+            name="ManageStoves" 
+            component={ManageStovesScreen}
+            options={{
+              title: "Manage Stoves",
+            }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ErrorBoundary>
+  );
+}

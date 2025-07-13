@@ -1,9 +1,27 @@
 import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, Picker } from 'react-native';
+import { View, Text, Button, StyleSheet, TextInput, useColorScheme } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  inputBackground: isDark ? '#2d2d2d' : '#ffffff',
+  inputBorder: isDark ? '#444444' : '#ccc',
+});
+
 export default function ManageStovesScreen() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const [action, setAction] = useState("ADD"); // ADD or LEND
   const [model, setModel] = useState("Single Burner");
   const [customerId, setCustomerId] = useState("");
@@ -57,14 +75,25 @@ export default function ManageStovesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { padding: 20 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
+const createStyles = (colors) => StyleSheet.create({
+  container: { 
+    padding: 20,
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  title: { 
+    fontSize: 24, 
+    fontWeight: 'bold', 
+    marginBottom: 20,
+    color: colors.text,
+  },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: colors.inputBorder,
     borderRadius: 5,
     padding: 10,
     marginBottom: 20,
+    backgroundColor: colors.inputBackground,
+    color: colors.text,
   },
 });

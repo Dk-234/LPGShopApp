@@ -1,10 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Switch, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Switch, TouchableOpacity, ScrollView, useColorScheme } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 
+// Color scheme utility
+const getColors = (isDark) => ({
+  background: isDark ? '#121212' : '#ffffff',
+  surface: isDark ? '#1e1e1e' : '#f5f5f5',
+  card: isDark ? '#2d2d2d' : '#ffffff',
+  text: isDark ? '#ffffff' : '#000000',
+  textSecondary: isDark ? '#b3b3b3' : '#666666',
+  border: isDark ? '#444444' : '#e0e0e0',
+  primary: '#007AFF',
+  success: '#34C759',
+  warning: '#FF9500',
+  error: '#FF3B30',
+  inputBackground: isDark ? '#2d2d2d' : '#ffffff',
+  inputBorder: isDark ? '#444444' : '#ccc',
+});
+
 export default function EditCustomerScreen({ route, navigation }) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = getColors(isDark);
+  const styles = createStyles(colors);
   const { customer } = route.params; // Changed from customerId to customer
   const [name, setName] = useState(customer.name || '');
   const [phone, setPhone] = useState(customer.phone || '');
@@ -134,10 +154,10 @@ export default function EditCustomerScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   safeContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.surface,
   },
   container: { 
     flex: 1, 
@@ -147,16 +167,28 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 100,
   },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
-  label: { fontSize: 16, fontWeight: '600', marginBottom: 5, marginTop: 10 },
+  title: { 
+    fontSize: 20, 
+    fontWeight: 'bold', 
+    marginBottom: 20,
+    color: colors.text,
+  },
+  label: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    marginBottom: 5, 
+    marginTop: 10,
+    color: colors.text,
+  },
   input: { 
     borderWidth: 1, 
-    borderColor: '#ccc', 
+    borderColor: colors.inputBorder, 
     padding: 12, 
     marginBottom: 15, 
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: colors.inputBackground,
     fontSize: 16,
+    color: colors.text,
   },
   counterContainer: {
     flexDirection: 'row',
@@ -168,6 +200,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginHorizontal: 20,
+    color: colors.text,
   },
   switchContainer: {
     flexDirection: 'row',
@@ -175,24 +208,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 15,
     padding: 10,
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   readOnlyField: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#e9ecef',
+    borderColor: colors.border,
     borderRadius: 8,
     padding: 12,
     marginBottom: 15,
   },
   readOnlyLabel: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textSecondary,
     marginBottom: 4,
     fontWeight: '500',
   },
   readOnlyValue: {
     fontSize: 16,
-    color: '#333',
+    color: colors.text,
     fontFamily: 'monospace',
     fontWeight: 'bold',
   },
