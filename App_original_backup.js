@@ -6,11 +6,6 @@ import { getFirestore, collection, addDoc, query, onSnapshot, doc, updateDoc, wh
 import { app, db } from './firebaseConfig';
 import { Picker } from '@react-native-picker/picker';
 
-// Import authentication
-import { AuthProvider } from './AuthContext';
-import LoginScreen from './LoginScreen';
-import { addCustomer as addCustomerToDb } from './dataService';
-
 // Import screens
 import ExportScreen from './ExportScreen';
 import DashboardScreen from './DashboardScreen';
@@ -22,7 +17,6 @@ import UpdateCylindersScreen from './UpdateCylindersScreen';
 import ManageStovesScreen from './ManageStovesScreen';
 
 const Stack = createNativeStackNavigator();
-const AuthStack = createNativeStackNavigator();
 
 // Add Customer Screen Component
 function AddCustomerScreen({ navigation }) {
@@ -100,15 +94,11 @@ function AddCustomerScreen({ navigation }) {
       }
     }
 
-    // Check if phone number is unique for current user
+    // Check if phone number is unique
     try {
-      const { getCurrentUserPhone } = require('./auth');
-      const userPhone = await getCurrentUserPhone();
-      
       const phoneQuery = query(
         collection(db, "customers"), 
-        where("phone", "==", phone.trim()),
-        where("userPhone", "==", userPhone)
+        where("phone", "==", phone.trim())
       );
       const phoneSnapshot = await getDocs(phoneQuery);
       
@@ -123,7 +113,7 @@ function AddCustomerScreen({ navigation }) {
     }
 
     try {
-      await addCustomerToDb({
+      await addDoc(collection(db, "customers"), {
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
@@ -133,6 +123,7 @@ function AddCustomerScreen({ navigation }) {
         gender,
         subsidy,
         bookId: bookId.trim(),
+        createdAt: new Date(),
         payment: {
           lastPaymentDate: null,
           status: 'pending'
@@ -736,200 +727,10 @@ const createStyles = (colors) => StyleSheet.create({
   },
 });
 
-// Main App Component (after authentication)
-function MainApp() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const { refreshAuth } = require('./AuthContext').useAuthContext(); // Get refreshAuth function
-
-  return (
-    <Stack.Navigator 
-      initialRouteName="Dashboard"
-      screenOptions={{
-        headerStyle: {
-          backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
-          height: 80, // Reduced global header height
-          elevation: 2,
-          shadowOpacity: 0.1,
-        },
-        headerTintColor: isDark ? '#ffffff' : '#000000',
-        headerTitleStyle: {
-          fontWeight: 'bold',
-          fontSize: 20,
-        },
-        headerStatusBarHeight: 30, // Remove extra status bar height
-        headerTitleContainerStyle: {
-          paddingTop: 10,
-          paddingBottom: 6,
-        },
-        headerLeftContainerStyle: {
-          paddingLeft: 8,
-        },
-        headerRightContainerStyle: {
-          paddingRight: 8,
-        },
-        headerBackTitleVisible: true, // Show back title for more space
-        headerTitleAlign: 'center',
-      }}
-    >
-      <Stack.Screen 
-        name="Dashboard" 
-        component={DashboardScreen}
-        options={({ navigation }) => ({
-          title: "LPG MAP📍",
-          headerShown: true,
-          headerRight: () => (
-            <TouchableOpacity 
-              style={{
-                backgroundColor: '#FF3B30',
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                borderRadius: 6,
-                marginRight: 5,
-              }}
-              onPress={() => {
-                Alert.alert(
-                  "Logout",
-                  "Are you sure you want to logout?",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    { 
-                      text: "Logout", 
-                      style: "destructive",
-                      onPress: async () => {
-                        const { logout } = require('./auth');
-                        await logout();
-                        // Refresh authentication state to trigger navigation
-                        await refreshAuth();
-                      }
-                    }
-                  ]
-                );
-              }}
-            >
-              <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
-                📴 Logout
-              </Text>
-            </TouchableOpacity>
-          ),
-        })}
-      />
-      <Stack.Screen 
-        name="CustomersListScreen" 
-        component={CustomersListScreen}
-        options={{
-          title: "Customers",
-        }}
-      />
-      <Stack.Screen 
-        name="BookingsListScreen" 
-        component={BookingsListScreen}
-        options={{
-          title: "Future Orders",
-        }}
-      />
-      <Stack.Screen 
-        name="InventoryScreen" 
-        component={InventoryScreen}
-        options={{
-          title: "Inventory Status",
-        }}
-      />
-      <Stack.Screen 
-        name="AddCustomer" 
-        component={AddCustomerScreen}
-        options={{
-          title: "Add New Customer",
-          headerStyle: {
-            backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
-            height: 60, // Same as global height
-            elevation: 2,
-            shadowOpacity: 0.1,
-          },
-          headerTitleStyle: {
-            fontWeight: 'bold',
-            fontSize: 16,
-          },
-        }}
-      />
-      <Stack.Screen 
-        name="EditCustomer" 
-        component={EditCustomerScreen}
-        options={{
-          title: "Edit Customer",
-        }}
-      />
-      <Stack.Screen 
-        name="BookingScreen" 
-        component={BookingScreen}
-        options={{
-          title: "Book Cylinder",
-        }}
-      />
-      <Stack.Screen 
-        name="ExportScreen" 
-        component={ExportScreen}
-        options={{
-          title: "Export Data",
-        }}
-      />
-      <Stack.Screen 
-        name="UpdateCylinders" 
-        component={UpdateCylindersScreen}
-        options={{
-          title: "Update Cylinders",
-        }}
-      />
-      <Stack.Screen 
-        name="ManageStoves" 
-        component={ManageStovesScreen}
-        options={{
-          title: "Manage Stoves",
-        }}
-      />
-    </Stack.Navigator>
-  );
-}
-
 // Main App Component
 export default function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-}
-
-function AppContent() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const { isLoading, needsAuth } = require('./AuthContext').useAuthContext();
-
-  if (isLoading) {
-    return (
-      <View style={{ 
-        flex: 1, 
-        backgroundColor: isDark ? '#121212' : '#ffffff',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
-        <Text style={{ 
-          color: isDark ? '#ffffff' : '#000000',
-          fontSize: 18,
-          fontWeight: 'bold'
-        }}>
-          LPG Shop Manager
-        </Text>
-        <Text style={{ 
-          color: isDark ? '#b3b3b3' : '#666666',
-          fontSize: 14,
-          marginTop: 10
-        }}>
-          Loading...
-        </Text>
-      </View>
-    );
-  }
 
   return (
     <ErrorBoundary>
@@ -939,13 +740,117 @@ function AppContent() {
         translucent={true}
       />
       <NavigationContainer>
-        {needsAuth ? (
-          <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-            <AuthStack.Screen name="Login" component={LoginScreen} />
-          </AuthStack.Navigator>
-        ) : (
-          <MainApp />
-        )}
+        <Stack.Navigator 
+          initialRouteName="Dashboard"
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
+              height: 80, // Reduced global header height
+              elevation: 2,
+              shadowOpacity: 0.1,
+            },
+            headerTintColor: isDark ? '#ffffff' : '#000000',
+            headerTitleStyle: {
+              fontWeight: 'bold',
+              fontSize: 20,
+            },
+            headerStatusBarHeight: 30, // Remove extra status bar height
+            headerTitleContainerStyle: {
+              paddingTop: 10,
+              paddingBottom: 6,
+            },
+            headerLeftContainerStyle: {
+              paddingLeft: 8,
+            },
+            headerRightContainerStyle: {
+              paddingRight: 8,
+            },
+            headerBackTitleVisible: true, // Show back title for more space
+            headerTitleAlign: 'center',
+          }}
+        >
+          <Stack.Screen 
+            name="Dashboard" 
+            component={DashboardScreen}
+            options={{
+              title: "LPG MAP📍",
+              headerShown: true,
+            }}
+          />
+          <Stack.Screen 
+            name="CustomersListScreen" 
+            component={CustomersListScreen}
+            options={{
+              title: "Customers",
+            }}
+          />
+          <Stack.Screen 
+            name="BookingsListScreen" 
+            component={BookingsListScreen}
+            options={{
+              title: "Today's orders",
+            }}
+          />
+          <Stack.Screen 
+            name="InventoryScreen" 
+            component={InventoryScreen}
+            options={{
+              title: "Inventory Status",
+            }}
+          />
+          <Stack.Screen 
+            name="AddCustomer" 
+            component={AddCustomerScreen}
+            options={{
+              title: "Add New Customer",
+              headerStyle: {
+                backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
+                height: 60, // Same as global height
+                elevation: 2,
+                shadowOpacity: 0.1,
+              },
+              headerTitleStyle: {
+                fontWeight: 'bold',
+                fontSize: 16,
+              },
+            }}
+          />
+          <Stack.Screen 
+            name="EditCustomer" 
+            component={EditCustomerScreen}
+            options={{
+              title: "Edit Customer",
+            }}
+          />
+          <Stack.Screen 
+            name="BookingScreen" 
+            component={BookingScreen}
+            options={{
+              title: "Book Cylinder",
+            }}
+          />
+          <Stack.Screen 
+            name="ExportScreen" 
+            component={ExportScreen}
+            options={{
+              title: "Export Data",
+            }}
+          />
+          <Stack.Screen 
+            name="UpdateCylinders" 
+            component={UpdateCylindersScreen}
+            options={{
+              title: "Update Cylinders",
+            }}
+          />
+          <Stack.Screen 
+            name="ManageStoves" 
+            component={ManageStovesScreen}
+            options={{
+              title: "Manage Stoves",
+            }}
+          />
+        </Stack.Navigator>
       </NavigationContainer>
     </ErrorBoundary>
   );

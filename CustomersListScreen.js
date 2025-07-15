@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, useColorScheme, TextInput, Alert } from 'react-native';
-import { collection, query, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { getCustomers, deleteCustomer } from './dataService';
 
 // Color scheme utility
 const getColors = (isDark) => ({
@@ -32,13 +31,17 @@ export default function CustomersListScreen({ navigation, route }) {
   const { filter } = route.params || {};
 
   useEffect(() => {
-    const q = query(collection(db, "customers"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setCustomers(list);
-    });
-    return unsubscribe;
+    const loadCustomers = async () => {
+      try {
+        const customersList = await getCustomers();
+        setCustomers(customersList);
+      } catch (error) {
+        console.error('Error loading customers:', error);
+        Alert.alert('Error', 'Failed to load customers');
+      }
+    };
+    
+    loadCustomers();
   }, []);
 
   // Filter customers based on the filter parameter and search query
@@ -92,8 +95,11 @@ export default function CustomersListScreen({ navigation, route }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, 'customers', customerId));
+              await deleteCustomer(customerId);
               Alert.alert('Success', 'Customer deleted successfully');
+              // Reload customers after deletion
+              const customersList = await getCustomers();
+              setCustomers(customersList);
             } catch (error) {
               console.error('Error deleting customer:', error);
               Alert.alert('Error', 'Failed to delete customer. Please try again.');

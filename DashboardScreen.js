@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, useColorScheme, Modal, TextInput, Alert } from 'react-native';
 import { collection, query, where, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
+import { getCurrentUserPhone } from './auth';
 
 // Color scheme utility for DashboardScreen
 const getColors = (isDark) => ({
@@ -94,44 +95,60 @@ export default function DashboardScreen({ navigation }) {
     // Load prices on component mount
     loadPrices();
     
-    try {
-      // Fetch customers
-      const customersQuery = query(collection(db, "customers"));
-      const customersUnsubscribe = onSnapshot(customersQuery, 
-        (snapshot) => {
-          const allCustomers = [];
-          snapshot.forEach((doc) => {
-            allCustomers.push({ id: doc.id, ...doc.data() });
-          });
-          setCustomers(allCustomers);
-        },
-        (error) => {
-          console.error("Error fetching customers:", error);
+    const setupUserAwareListeners = async () => {
+      try {
+        const userPhone = await getCurrentUserPhone();
+        if (!userPhone) {
+          console.error('No user phone found');
+          return;
         }
-      );
 
-      // Fetch bookings
-      const bookingsQuery = query(collection(db, "bookings"));
-      const bookingsUnsubscribe = onSnapshot(bookingsQuery, 
-        (snapshot) => {
-          const allBookings = [];
-          snapshot.forEach((doc) => {
-            allBookings.push({ id: doc.id, ...doc.data() });
-          });
-          setBookings(allBookings);
-        },
-        (error) => {
-          console.error("Error fetching bookings:", error);
-        }
-      );
+        // Fetch customers for current user
+        const customersQuery = query(
+          collection(db, "customers"),
+          where("userPhone", "==", userPhone)
+        );
+        const customersUnsubscribe = onSnapshot(customersQuery, 
+          (snapshot) => {
+            const allCustomers = [];
+            snapshot.forEach((doc) => {
+              allCustomers.push({ id: doc.id, ...doc.data() });
+            });
+            setCustomers(allCustomers);
+          },
+          (error) => {
+            console.error("Error fetching customers:", error);
+          }
+        );
 
-      return () => {
-        customersUnsubscribe();
-        bookingsUnsubscribe();
-      };
-    } catch (error) {
-      console.error("Error setting up dashboard listeners:", error);
-    }
+        // Fetch bookings for current user
+        const bookingsQuery = query(
+          collection(db, "bookings"),
+          where("userPhone", "==", userPhone)
+        );
+        const bookingsUnsubscribe = onSnapshot(bookingsQuery, 
+          (snapshot) => {
+            const allBookings = [];
+            snapshot.forEach((doc) => {
+              allBookings.push({ id: doc.id, ...doc.data() });
+            });
+            setBookings(allBookings);
+          },
+          (error) => {
+            console.error("Error fetching bookings:", error);
+          }
+        );
+
+        return () => {
+          customersUnsubscribe();
+          bookingsUnsubscribe();
+        };
+      } catch (error) {
+        console.error("Error setting up dashboard listeners:", error);
+      }
+    };
+
+    setupUserAwareListeners();
   }, []);
 
   // Update stats whenever customers or bookings change
@@ -313,7 +330,7 @@ export default function DashboardScreen({ navigation }) {
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.card, styles.halfCard, styles.clickableCard]}
-          onPress={() => navigation.navigate('BookingsListScreen')}
+          onPress={() => navigation.navigate('BookingsListScreen', { dateFilter: 'today' })}
           activeOpacity={0.7}
         >
           <Text style={styles.cardTitle}>Today's Orders</Text>

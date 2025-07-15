@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, Switch, useColorScheme } from 'react-native';
-import { doc, getDoc, collection, addDoc, query, onSnapshot, where, getDocs, deleteDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
+import { getCustomers, addBooking, addMultipleCylinders, removeCylinders } from './dataService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 
@@ -96,14 +97,16 @@ export default function BookingScreen({ route, navigation }) {
   // Fetch all customers for dropdown if no customerId provided
   useEffect(() => {
     if (!customerId) {
-      const q = query(collection(db, "customers"));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list = [];
-        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-        setCustomers(list);
-        setFilteredCustomers(list);
-      });
-      return unsubscribe;
+      const loadCustomers = async () => {
+        try {
+          const customersList = await getCustomers();
+          setCustomers(customersList);
+          setFilteredCustomers(customersList);
+        } catch (error) {
+          console.error('Error loading customers:', error);
+        }
+      };
+      loadCustomers();
     }
   }, [customerId]);
 
@@ -252,7 +255,7 @@ export default function BookingScreen({ route, navigation }) {
     }
     
     try {
-      await addDoc(collection(db, "bookings"), {
+      await addBooking({
         customerId: customerIdToBook,
         cylinders,
         cylinderType,
@@ -262,7 +265,6 @@ export default function BookingScreen({ route, navigation }) {
         serviceType,
         status: "Booked",
         emptyCylinderReceived: (serviceType === 'Drop' || serviceType === 'Pickup + Drop') ? emptyCylinderReceived : false,
-        createdAt: new Date(),
       });
 
       // Update inventory if empty cylinder was received during booking
@@ -288,46 +290,23 @@ export default function BookingScreen({ route, navigation }) {
   const updateInventory = async (cylinderType, action, quantity = 1) => {
     try {
       if (action === 'addEmpty') {
-        // Add empty cylinders to inventory (create multiple documents)
-        const addPromises = [];
-        for (let i = 0; i < quantity; i++) {
-          addPromises.push(addDoc(collection(db, "cylinders"), {
-            type: cylinderType,
-            status: "EMPTY",
-            lastUpdated: new Date(),
-          }));
-        }
-        await Promise.all(addPromises);
+        // Add empty cylinders to inventory using dataService
+        await addMultipleCylinders({
+          type: cylinderType,
+          status: "EMPTY"
+        }, quantity);
         console.log(`Successfully added ${quantity} empty ${cylinderType} cylinders to inventory`);
       } else if (action === 'removeFull') {
-        // Get all full cylinders of this type at once
-        const fullCylindersQuery = query(
-          collection(db, "cylinders"), 
-          where("status", "==", "FULL"),
-          where("type", "==", cylinderType)
-        );
-        const snapshot = await getDocs(fullCylindersQuery);
-        
-        if (snapshot.size >= quantity) {
-          // Delete the required number of cylinders
-          const deletePromises = [];
-          for (let i = 0; i < quantity && i < snapshot.docs.length; i++) {
-            deletePromises.push(deleteDoc(doc(db, "cylinders", snapshot.docs[i].id)));
-          }
-          await Promise.all(deletePromises);
-          console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
-        } else {
-          console.warn(`Only ${snapshot.size} full ${cylinderType} cylinders available, but ${quantity} needed`);
-          // Delete what we have available
-          const deletePromises = snapshot.docs.map(docSnapshot => 
-            deleteDoc(doc(db, "cylinders", docSnapshot.id))
-          );
-          await Promise.all(deletePromises);
-        }
+        // Remove full cylinders from inventory using dataService
+        await removeCylinders(cylinderType, "FULL", quantity);
+        console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
       }
     } catch (error) {
       console.error("Error updating inventory:", error);
       // Don't throw error to avoid breaking the booking process
+      if (error.message && error.message.includes('insufficient:')) {
+        console.warn(`Inventory warning: ${error.message}`);
+      }
     }
   };
 

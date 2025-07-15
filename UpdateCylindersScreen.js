@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, Button, StyleSheet, TextInput, useColorScheme } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { addMultipleCylinders } from './dataService';
 
 // Color scheme utility
 const getColors = (isDark) => ({
@@ -27,14 +26,16 @@ export default function UpdateCylindersScreen() {
   const [quantity, setQuantity] = useState(1);
 
   const handleAdd = async () => {
-    for (let i = 0; i < quantity; i++) {
-      await addDoc(collection(db, "cylinders"), {
+    try {
+      await addMultipleCylinders({
         type,
-        status,
-        lastUpdated: new Date(),
-      });
+        status
+      }, quantity);
+      alert(`${quantity} ${type} cylinders (${status}) added!`);
+    } catch (error) {
+      console.error("Error adding cylinders:", error);
+      alert("Error adding cylinders. Please try again.");
     }
-    alert(`${quantity} ${type} cylinders (${status}) added!`);
   };
 
   return (

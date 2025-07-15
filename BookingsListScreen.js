@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Animated, useColorScheme } from 'react-native';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, deleteDoc, addDoc, getDocs } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { getBookings, getCustomers, updateBooking as updateBookingInDB, deleteBooking, updateCustomer, getCylinders, removeCylinders } from './dataService';
+import { doc, getDoc } from 'firebase/firestore'; // Keep these for settings/prices
+import { db } from './firebaseConfig'; // Keep this for settings/prices
 import { Picker } from '@react-native-picker/picker';
 
 // Color scheme utility
@@ -40,6 +41,7 @@ export default function BookingsListScreen({ route }) {
     'Pickup + Drop': 70
   });
   const [paymentFilter, setPaymentFilter] = useState('All'); // All/Pending/Paid/Partial
+  const [dateFilter, setDateFilter] = useState('all'); // all/today
   
   // Get initial filter from route params
   useEffect(() => {
@@ -49,7 +51,14 @@ export default function BookingsListScreen({ route }) {
       // Reset to 'All' if no filter is provided
       setPaymentFilter('All');
     }
-  }, [route?.params?.paymentFilter]);
+    
+    // Handle date filter from route params
+    if (route?.params?.dateFilter) {
+      setDateFilter(route.params.dateFilter);
+    } else {
+      setDateFilter('all');
+    }
+  }, [route?.params?.paymentFilter, route?.params?.dateFilter]);
   
   // Modal states
   const [modalVisible, setModalVisible] = useState(false);
@@ -87,112 +96,93 @@ export default function BookingsListScreen({ route }) {
     loadPricesAndFees();
   }, []);
 
-  useEffect(() => {
-    let q;
-    if (filter === 'All') {
-      q = query(collection(db, "bookings"));
-    } else {
-      q = query(collection(db, "bookings"), where("status", "==", filter));
-    }
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setBookings(list);
+  // Function to load bookings data
+  const loadBookings = async () => {
+    try {
+      const bookingsList = await getBookings();
+      const customersList = await getCustomers();
+      
+      let filteredBookings = bookingsList;
+      
+      // Apply delivery status filter
+      if (filter !== 'All') {
+        filteredBookings = bookingsList.filter(booking => booking.status === filter);
+      }
+      
+      setBookings(filteredBookings);
       
       // Fetch customer details for each booking
-      const bookingsWithCustomerData = await Promise.all(
-        list.map(async (booking) => {
-          try {
-            const customerRef = doc(db, "customers", booking.customerId);
-            const customerSnap = await getDoc(customerRef);
-            
-            if (customerSnap.exists()) {
-              return {
-                ...booking,
-                customerName: customerSnap.data().name,
-                customerPhone: customerSnap.data().phone,
-                customerBookId: customerSnap.data().bookId,
-              };
-            } else {
-              return {
-                ...booking,
-                customerName: "Customer Not Found",
-                customerPhone: "N/A",
-                customerBookId: "N/A",
-              };
-            }
-          } catch (error) {
-            return {
-              ...booking,
-              customerName: "Error Loading",
-              customerPhone: "N/A",
-              customerBookId: "N/A",
-            };
-          }
-        })
-      );
-      
-      // Apply filter-specific logic
-      let filteredBookings = bookingsWithCustomerData;
+      let bookingsWithCustomerData = filteredBookings.map(booking => {
+        const customer = customersList.find(c => c.id === booking.customerId);
+        return {
+          ...booking,
+          customerName: customer?.name || "Customer Not Found",
+          customerPhone: customer?.phone || "N/A",
+          customerBookId: customer?.bookId || "N/A",
+        };
+      });
       
       // Apply payment filter
       if (paymentFilter !== 'All') {
-        filteredBookings = filteredBookings.filter(booking => {
+        bookingsWithCustomerData = bookingsWithCustomerData.filter(booking => {
           const paymentStatus = booking.payment?.status || 'Pending';
           return paymentStatus === paymentFilter;
         });
       }
       
-      // Apply sorting only when viewing 'All' bookings
-      let finalBookings = filteredBookings;
+      // Apply date filter (2-day filter for today's bookings)
+      if (dateFilter === 'today') {
+        const now = new Date();
+        const twoDaysFromNow = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000));
+        
+        bookingsWithCustomerData = bookingsWithCustomerData.filter(booking => {
+          const deliveryDate = booking.deliveryDate?.toDate ? booking.deliveryDate.toDate() : new Date(booking.deliveryDate);
+          // Show bookings with delivery date within next 2 days
+          return deliveryDate <= twoDaysFromNow;
+        });
+      }
       
+      // Apply sorting based on filter type
       if (filter === 'All') {
         // Sort bookings: Active orders first, then completed orders
-        // Separate active and completed orders first
-        const activeOrders = filteredBookings.filter(booking => booking.status !== 'Delivered');
-        const completedOrders = filteredBookings.filter(booking => booking.status === 'Delivered');
+        const activeOrders = bookingsWithCustomerData.filter(booking => booking.status !== 'Delivered');
+        const completedOrders = bookingsWithCustomerData.filter(booking => booking.status === 'Delivered');
         
-        // Sort active orders by delivery date (earliest first)
         activeOrders.sort((a, b) => {
           const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
           const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
           return aDate - bDate;
         });
         
-        // Sort completed orders by completion time (most recent first)
         completedOrders.sort((a, b) => {
           const aUpdated = a.updatedAt?.toDate ? a.updatedAt.toDate() : new Date(a.updatedAt || a.createdAt || 0);
           const bUpdated = b.updatedAt?.toDate ? b.updatedAt.toDate() : new Date(b.updatedAt || b.createdAt || 0);
           return bUpdated - aUpdated;
         });
         
-        // Combine: active orders first, then completed orders
-        finalBookings = [...activeOrders, ...completedOrders];
-      } else if (filter === 'In Transit') {
-        // For In Transit, sort by delivery date (earliest first) to prioritize urgent deliveries
-        finalBookings = filteredBookings.sort((a, b) => {
-          const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
-          const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
-          return aDate - bDate;
-        });
+        bookingsWithCustomerData = [...activeOrders, ...completedOrders];
       } else {
-        // For specific filters (Booked/Delivered), just sort by delivery date
-        finalBookings = filteredBookings.sort((a, b) => {
+        // For specific filters, sort by delivery date
+        bookingsWithCustomerData.sort((a, b) => {
           const aDate = a.deliveryDate?.toDate ? a.deliveryDate.toDate() : new Date(a.deliveryDate || 0);
           const bDate = b.deliveryDate?.toDate ? b.deliveryDate.toDate() : new Date(b.deliveryDate || 0);
           return aDate - bDate;
         });
       }
       
-      setBookingsWithCustomers(finalBookings);
+      setBookingsWithCustomers(bookingsWithCustomerData);
       
-      // Check for expired bookings to auto-delete
-      checkAndDeleteExpiredBookings(filteredBookings);
-    });
+      // Also load cylinder counts for inventory warnings
+      await loadCylinderCounts();
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+      Alert.alert('Error', 'Failed to load bookings');
+    }
+  };
 
-    return unsubscribe;
-  }, [filter, paymentFilter]);
+  useEffect(() => {
+    loadBookings();
+  }, [filter, paymentFilter, dateFilter]);
 
   // Auto-delete function for completed bookings after 20 hours
   const checkAndDeleteExpiredBookings = async (bookings) => {
@@ -204,7 +194,7 @@ export default function BookingsListScreen({ route }) {
       
       if (isPaidAndDelivered && booking.updatedAt) {
         const updatedTime = booking.updatedAt.toDate ? booking.updatedAt.toDate() : new Date(booking.updatedAt);
-        const hoursDifference = (now - updatedTime) / (1000 * 60 * 60); // Convert to hours
+        const hoursDifference = (now - updatedTime) / (1000 * 60 * 60);
         
         if (hoursDifference >= 20) {
           expiredBookings.push(booking);
@@ -212,11 +202,11 @@ export default function BookingsListScreen({ route }) {
       }
     });
 
-    // Delete expired bookings
+    // Delete expired bookings using dataService
     if (expiredBookings.length > 0) {
       for (const booking of expiredBookings) {
         try {
-          await deleteDoc(doc(db, "bookings", booking.id));
+          await deleteBooking(booking.id);
         } catch (error) {
           console.error(`❌ Error deleting booking ${booking.id}:`, error);
         }
@@ -245,62 +235,6 @@ export default function BookingsListScreen({ route }) {
 
     return () => clearInterval(timerUpdateInterval);
   }, []);
-
-  // Enhanced useEffect to include auto-deletion and initial cleanup
-  useEffect(() => {
-    let q;
-    if (filter === 'All') {
-      q = query(collection(db, "bookings"));
-    } else {
-      q = query(collection(db, "bookings"), where("status", "==", filter));
-    }
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setBookings(list);
-      
-      // Always run cleanup check when data changes
-      await checkAndDeleteExpiredBookings(list);
-      
-      // Fetch customer details for each booking
-      const bookingsWithCustomerData = await Promise.all(
-        list.map(async (booking) => {
-          try {
-            const customerRef = doc(db, "customers", booking.customerId);
-            const customerSnap = await getDoc(customerRef);
-            
-            if (customerSnap.exists()) {
-              return {
-                ...booking,
-                customerName: customerSnap.data().name,
-                customerPhone: customerSnap.data().phone,
-                customerBookId: customerSnap.data().bookId,
-              };
-            } else {
-              return {
-                ...booking,
-                customerName: "Customer Not Found",
-                customerPhone: "N/A",
-                customerBookId: "N/A",
-              };
-            }
-          } catch (error) {
-            return {
-              ...booking,
-              customerName: "Error Loading",
-              customerPhone: "N/A",
-              customerBookId: "N/A",
-            };
-          }
-        })
-      );
-      
-      setBookingsWithCustomers(bookingsWithCustomerData);
-    });
-
-    return unsubscribe;
-  }, [filter]);
 
   const openModal = (booking) => {
     // Check if booking is paid and delivered (locked state)
@@ -377,7 +311,6 @@ export default function BookingsListScreen({ route }) {
     setIsUpdating(true);
     
     try {
-      const bookingRef = doc(db, "bookings", selectedBooking.id);
       const paymentDate = new Date();
       
       // Calculate actual amount for paid status
@@ -403,11 +336,24 @@ export default function BookingsListScreen({ route }) {
         updatedAt: paymentDate, // This timestamp will be used for 20-hour deletion countdown
       };
       
-      await updateDoc(bookingRef, updateData);
+      console.log('📝 Updating booking with data:', updateData);
+      await updateBookingInDB(selectedBooking.id, updateData);
+      console.log('✅ Booking update completed successfully');
       
       // Update inventory when delivery status changes to "Delivered"
       if (deliveryStatus === 'Delivered' && selectedBooking.status !== 'Delivered') {
-        await updateInventoryOnDelivery(selectedBooking);
+        try {
+          await updateInventoryOnDelivery(selectedBooking);
+        } catch (inventoryError) {
+          console.log("Inventory update was cancelled or failed:", inventoryError.message);
+          // If user cancelled due to insufficient inventory, don't proceed with delivery
+          if (inventoryError.message.includes("cancelled by user")) {
+            Alert.alert("Delivery Cancelled", "The delivery was not completed due to insufficient Stock.");
+            return; // Exit the function without updating the booking
+          }
+          // For other inventory errors, log but continue with delivery
+          console.warn("Inventory update failed but continuing with delivery:", inventoryError.message);
+        }
       }
       
       // Update customer payment history if payment was made OR if updating delivery status for already paid orders
@@ -430,7 +376,10 @@ export default function BookingsListScreen({ route }) {
         isNowComplete 
           ? "Booking updated successfully!\n\n⏰ This completed order will be automatically removed in 20 hours."
           : "Booking updated successfully!",
-        [{ text: "OK", onPress: closeModal }]
+        [{ text: "OK", onPress: () => {
+          closeModal();
+          loadBookings(); // Refresh the bookings list to show updated status
+        }}]
       );
       
     } catch (error) {
@@ -443,12 +392,12 @@ export default function BookingsListScreen({ route }) {
   // Function to update customer payment history
   const updateCustomerPaymentHistory = async (customerId, paymentDate, paymentStatus, amount) => {
     try {
-      const customerRef = doc(db, "customers", customerId);
-      const customerSnap = await getDoc(customerRef);
+      // Get customers to find the specific customer
+      const customers = await getCustomers();
+      const customer = customers.find(c => c.id === customerId);
       
-      if (customerSnap.exists()) {
-        const customerData = customerSnap.data();
-        const currentHistory = customerData.paymentHistory || [];
+      if (customer) {
+        const currentHistory = customer.paymentHistory || [];
         
         // Determine transaction status based on BOTH payment and delivery status
         let transactionStatus;
@@ -511,10 +460,10 @@ export default function BookingsListScreen({ route }) {
           });
         
         // Update customer document
-        await updateDoc(customerRef, {
+        await updateCustomer(customerId, {
           paymentHistory: updatedHistory,
           payment: {
-            ...customerData.payment,
+            ...customer.payment,
             lastPaymentDate: paymentDate,
             status: paymentStatus // Update current payment status
           }
@@ -567,7 +516,7 @@ export default function BookingsListScreen({ route }) {
         });
         
         // Update customer document with modified history
-        await updateDoc(customerRef, {
+        await updateCustomer(customerId, {
           paymentHistory: updatedHistory
         });
       }
@@ -579,12 +528,12 @@ export default function BookingsListScreen({ route }) {
   // Utility function to fix "FULL" amounts in existing payment records
   const fixFullAmountsInHistory = async (customerId, bookingDetails) => {
     try {
-      const customerRef = doc(db, "customers", customerId);
-      const customerSnap = await getDoc(customerRef);
+      // Get customers to find the specific customer
+      const customers = await getCustomers();
+      const customer = customers.find(c => c.id === customerId);
       
-      if (customerSnap.exists()) {
-        const customerData = customerSnap.data();
-        const currentHistory = customerData.paymentHistory || [];
+      if (customer) {
+        const currentHistory = customer.paymentHistory || [];
         
         // Check if there are any "FULL" amounts that need fixing
         const hasFullAmounts = currentHistory.some(transaction => transaction.amount === 'FULL');
@@ -603,7 +552,7 @@ export default function BookingsListScreen({ route }) {
           });
           
           // Update customer document with fixed amounts
-          await updateDoc(customerRef, {
+          await updateCustomer(customerId, {
             paymentHistory: updatedHistory
           });
           
@@ -621,33 +570,50 @@ export default function BookingsListScreen({ route }) {
       const cylinderType = booking.cylinderType || '14.2kg';
       const quantity = booking.cylinders || 1;
       
-      // Get all full cylinders of this type at once
-      const fullCylindersQuery = query(
-        collection(db, "cylinders"), 
-        where("status", "==", "FULL"),
-        where("type", "==", cylinderType)
-      );
-      const snapshot = await getDocs(fullCylindersQuery);
+      console.log(`Attempting to remove ${quantity} full ${cylinderType} cylinders from inventory`);
       
-      if (snapshot.size >= quantity) {
-        // Delete the required number of cylinders
-        const deletePromises = [];
-        for (let i = 0; i < quantity && i < snapshot.docs.length; i++) {
-          deletePromises.push(deleteDoc(doc(db, "cylinders", snapshot.docs[i].id)));
-        }
-        await Promise.all(deletePromises);
-        console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
-      } else {
-        console.warn(`Only ${snapshot.size} full ${cylinderType} cylinders available, but ${quantity} needed for delivery`);
-        // Delete what we have available
-        const deletePromises = snapshot.docs.map(docSnapshot => 
-          deleteDoc(doc(db, "cylinders", docSnapshot.id))
-        );
-        await Promise.all(deletePromises);
-      }
+      // Use the dataService removeCylinders function for user-isolated operations
+      await removeCylinders(cylinderType, "FULL", quantity);
+      
+      console.log(`Successfully removed ${quantity} full ${cylinderType} cylinders from inventory`);
     } catch (error) {
       console.error("Error updating inventory on delivery:", error);
-      // Don't throw error to avoid breaking the delivery update process
+      
+      // If it's an insufficient cylinders error, show confirmation popup
+      if (error.message && error.message.includes('insufficient:')) {
+        console.warn(`Inventory warning: ${error.message}`);
+        
+        // Show confirmation popup for insufficient inventory
+        return new Promise((resolve) => {
+          Alert.alert(
+            "⚠️ Insufficient Stock",
+            `${error.message}\n\nDo you want to proceed with the delivery anyway? This will mark the order as delivered but inventory won't be updated.`,
+            [
+              {
+                text: "Cancel Delivery", 
+                style: "cancel",
+                onPress: () => {
+                  // Throw error to prevent delivery update
+                  resolve(Promise.reject(new Error("Delivery cancelled by user due to insufficient Stock")));
+                }
+              },
+              {
+                text: "Proceed Anyway", 
+                style: "default",
+                onPress: () => {
+                  console.log("User chose to proceed with delivery despite insufficient Stock ");
+                  resolve(Promise.resolve());
+                }
+              }
+            ],
+            { cancelable: false }
+          );
+        });
+      } else {
+        // For other errors, we still don't want to break the delivery process
+        console.error("Unexpected error updating inventory:", error);
+        // Still allow delivery to proceed for other types of errors
+      }
     }
   };
 
@@ -657,6 +623,41 @@ export default function BookingsListScreen({ route }) {
     const pricePerCylinder = CYLINDER_PRICES[cylinderType] || CYLINDER_PRICES['14.2kg'];
     return booking.cylinders * pricePerCylinder;
   };
+
+  // State for cylinder inventory counts
+  const [cylinderCounts, setCylinderCounts] = useState({});
+
+  // Function to load cylinder inventory counts
+  const loadCylinderCounts = async () => {
+    try {
+      const cylinders = await getCylinders();
+      const counts = {};
+      
+      cylinders.forEach(cylinder => {
+        if (!counts[cylinder.type]) {
+          counts[cylinder.type] = { FULL: 0, EMPTY: 0 };
+        }
+        counts[cylinder.type][cylinder.status] = (counts[cylinder.type][cylinder.status] || 0) + 1;
+      });
+      
+      setCylinderCounts(counts);
+    } catch (error) {
+      console.error('Error loading cylinder counts:', error);
+    }
+  };
+
+  // Helper function to check if booking has sufficient inventory
+  const hasInsufficientInventory = (booking) => {
+    const cylinderType = booking.cylinderType || '14.2kg';
+    const quantity = booking.cylinders || 1;
+    const available = cylinderCounts[cylinderType]?.FULL || 0;
+    return available < quantity;
+  };
+
+  // Load cylinder counts on component mount
+  useEffect(() => {
+    loadCylinderCounts();
+  }, []);
 
   // Helper function to format time remaining for auto-delete
   const formatTimeRemaining = (hoursLeft) => {
@@ -690,6 +691,9 @@ export default function BookingsListScreen({ route }) {
       showTimer = true;
       timerText = formatTimeRemaining(hoursLeft);
     }
+    
+    // Check for insufficient inventory warning (only for pending deliveries)
+    const isInventoryLow = item.status !== 'Delivered' && hasInsufficientInventory(item);
     
     return (
       <TouchableOpacity 
@@ -749,6 +753,15 @@ export default function BookingsListScreen({ route }) {
             isExpiringSoon ? styles.warningTimer : styles.normalTimer
           ]}>
             {timerText}
+          </Text>
+        </View>
+      )}
+      
+      {/* Low inventory warning */}
+      {isInventoryLow && (
+        <View style={styles.inventoryWarning}>
+          <Text style={styles.inventoryWarningText}>
+            ⚠️ Insufficient Stock for this booking!
           </Text>
         </View>
       )}
@@ -894,7 +907,15 @@ export default function BookingsListScreen({ route }) {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>      
+      </View>
+      
+      {/* Date filter indicator */}
+      {dateFilter === 'today' && (
+        <View style={styles.dateFilterInfo}>
+          <Text style={styles.dateFilterText}>📅 Showing bookings with delivery within 2 days</Text>
+        </View>
+      )}
+      
       {/* Sorting information */}
       {filter === 'All' && bookingsWithCustomers.length > 0 && (
         <View style={styles.sortingInfo}>
@@ -1250,6 +1271,36 @@ const createStyles = (colors) => StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  // Date filter styles
+  dateFilterInfo: {
+    backgroundColor: colors.primary + '15',
+    padding: 8,
+    borderRadius: 6,
+    marginVertical: 5,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  dateFilterText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  // Inventory warning styles
+  inventoryWarning: {
+    backgroundColor: '#fff3cd',
+    padding: 10,
+    borderRadius: 6,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ffc107',
+  },
+  inventoryWarningText: {
+    fontSize: 12,
+    color: '#856404',
+    fontWeight: 'bold',
     textAlign: 'center',
   },
 });

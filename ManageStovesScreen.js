@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, TextInput, useColorScheme } from 'react-native';
+import { View, Text, Button, StyleSheet, TextInput, useColorScheme, Alert } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { addStove } from './dataService';
 
 // Color scheme utility
 const getColors = (isDark) => ({
@@ -27,15 +26,20 @@ export default function ManageStovesScreen() {
   const [customerId, setCustomerId] = useState("");
 
   const handleAction = async () => {
-    if (action === "ADD") {
-      await addDoc(collection(db, "stoves"), {
-        model,
-        status: "AVAILABLE",
-      });
-      alert("Stove added to inventory!");
-    } else {
-      // Mark stove as lent (requires fetching an available stove first)
-      alert("Lent stove to customer " + customerId);
+    try {
+      if (action === "ADD") {
+        await addStove({
+          model,
+          status: "AVAILABLE",
+        });
+        Alert.alert("Success", "Stove added to inventory!");
+      } else {
+        // Mark stove as lent (requires fetching an available stove first)
+        Alert.alert("Info", "Use the main Inventory screen to lend stoves to customers with proper customer selection.");
+      }
+    } catch (error) {
+      console.error("Error in stove action:", error);
+      Alert.alert("Error", "Failed to perform action: " + error.message);
     }
   };
 
@@ -49,7 +53,7 @@ export default function ManageStovesScreen() {
         style={styles.input}
       >
         <Picker.Item label="Add New Stove" value="ADD" />
-        <Picker.Item label="Lend to Customer" value="LEND" />
+        <Picker.Item label="Rent to Customer" value="LEND" />
       </Picker>
 
       <Picker
