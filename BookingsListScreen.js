@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, Animated, useColorScheme } from 'react-native';
-import { getBookings, getCustomers, updateBooking as updateBookingInDB, deleteBooking, updateCustomer, getCylinders, removeCylinders } from './dataService';
+import { getBookings, getCustomers, updateBooking as updateBookingInDB, deleteBooking, updateCustomer, getCylinders, removeCylinders, getCurrentUserPhone, getUserPricing } from './dataService';
 import { doc, getDoc } from 'firebase/firestore'; // Keep these for settings/prices
 import { db } from './firebaseConfig'; // Keep this for settings/prices
 import { Picker } from '@react-native-picker/picker';
@@ -30,9 +30,9 @@ export default function BookingsListScreen({ route }) {
   
   // Pricing constants (loaded from Firebase)
   const [CYLINDER_PRICES, setCYLINDER_PRICES] = useState({
-    '14.2kg': 1150,
-    '5kg': 450,
-    '19kg': 1350
+    '14.2kg': 850,
+    '5kg': 400,
+    '19kg': 1200
   });
   const [SERVICE_FEES, setSERVICE_FEES] = useState({
     'No': 0,
@@ -72,22 +72,27 @@ export default function BookingsListScreen({ route }) {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(300));
 
-  // Load prices and service fees from Firebase
+  // Load prices and service fees from Firebase (user-specific)
   const loadPricesAndFees = async () => {
     try {
-      // Load cylinder prices
-      const pricesDoc = await getDoc(doc(db, "settings", "prices"));
-      if (pricesDoc.exists()) {
-        setCYLINDER_PRICES(pricesDoc.data());
-      }
-      
-      // Load service fees
-      const serviceFeesDoc = await getDoc(doc(db, "settings", "serviceFees"));
-      if (serviceFeesDoc.exists()) {
-        setSERVICE_FEES(serviceFeesDoc.data());
-      }
+      const userPhone = await getCurrentUserPhone();
+      const pricing = await getUserPricing(userPhone);
+      setCYLINDER_PRICES(pricing.cylinderPrices);
+      setSERVICE_FEES(pricing.serviceFees);
     } catch (error) {
       console.error("Error loading prices and fees:", error);
+      // Set default values if error
+      setCYLINDER_PRICES({
+        '5 kg': 400,
+        '14.2 kg': 850,
+        '19 kg': 1200
+      });
+      setSERVICE_FEES({
+        'No': 0,
+        'Pickup': 0,
+        'Drop': 0,
+        'Pickup + Drop': 0
+      });
     }
   };
 
@@ -620,7 +625,7 @@ export default function BookingsListScreen({ route }) {
   // Helper function to calculate price based on cylinder type
   const calculateCylinderCost = (booking) => {
     const cylinderType = booking.cylinderType || '14.2kg'; // Default to 14.2kg for legacy bookings
-    const pricePerCylinder = CYLINDER_PRICES[cylinderType] || CYLINDER_PRICES['14.2kg'];
+    const pricePerCylinder = CYLINDER_PRICES[cylinderType] || CYLINDER_PRICES['14.2kg'] || 0;
     return booking.cylinders * pricePerCylinder;
   };
 
@@ -648,7 +653,7 @@ export default function BookingsListScreen({ route }) {
 
   // Helper function to check if booking has sufficient inventory
   const hasInsufficientInventory = (booking) => {
-    const cylinderType = booking.cylinderType || '14.2kg';
+    const cylinderType = booking.cylinderType || '14.2 kg';
     const quantity = booking.cylinders || 1;
     const available = cylinderCounts[cylinderType]?.FULL || 0;
     return available < quantity;

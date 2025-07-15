@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ScrollView, FlatList, Switch, TouchableOpacity, KeyboardAvoidingView, Platform, Dimensions, Modal, Alert, useColorScheme, StatusBar } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { getFirestore, collection, addDoc, query, onSnapshot, doc, updateDoc, where, getDocs } from 'firebase/firestore';
 import { app, db } from './firebaseConfig';
 import { Picker } from '@react-native-picker/picker';
@@ -748,7 +749,6 @@ function MainApp() {
       screenOptions={{
         headerStyle: {
           backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa',
-          height: 80, // Reduced global header height
           elevation: 2,
           shadowOpacity: 0.1,
         },
@@ -756,11 +756,6 @@ function MainApp() {
         headerTitleStyle: {
           fontWeight: 'bold',
           fontSize: 20,
-        },
-        headerStatusBarHeight: 30, // Remove extra status bar height
-        headerTitleContainerStyle: {
-          paddingTop: 10,
-          paddingBottom: 6,
         },
         headerLeftContainerStyle: {
           paddingLeft: 8,
@@ -894,9 +889,11 @@ function MainApp() {
 // Main App Component
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -907,12 +904,17 @@ function AppContent() {
 
   if (isLoading) {
     return (
-      <View style={{ 
+      <SafeAreaView style={{ 
         flex: 1, 
         backgroundColor: isDark ? '#121212' : '#ffffff',
         justifyContent: 'center',
         alignItems: 'center'
       }}>
+        <StatusBar 
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={isDark ? '#121212' : '#ffffff'}
+          translucent={false}
+        />
         <Text style={{ 
           color: isDark ? '#ffffff' : '#000000',
           fontSize: 18,
@@ -927,26 +929,28 @@ function AppContent() {
         }}>
           Loading...
         </Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <ErrorBoundary>
-      <StatusBar 
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={isDark ? '#1a1a1a' : '#f8f9fa'}
-        translucent={true}
-      />
-      <NavigationContainer>
-        {needsAuth ? (
-          <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-            <AuthStack.Screen name="Login" component={LoginScreen} />
-          </AuthStack.Navigator>
-        ) : (
-          <MainApp />
-        )}
-      </NavigationContainer>
+      <SafeAreaView style={{ flex: 1, backgroundColor: isDark ? '#1a1a1a' : '#f8f9fa' }}>
+        <StatusBar 
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={isDark ? '#1a1a1a' : '#f8f9fa'}
+          translucent={false}
+        />
+        <NavigationContainer>
+          {needsAuth ? (
+            <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+              <AuthStack.Screen name="Login" component={LoginScreen} />
+            </AuthStack.Navigator>
+          ) : (
+            <MainApp />
+          )}
+        </NavigationContainer>
+      </SafeAreaView>
     </ErrorBoundary>
   );
 }

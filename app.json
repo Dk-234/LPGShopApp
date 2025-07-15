@@ -2,7 +2,7 @@
   "expo": {
     "name": "LPG Map",
     "slug": "LPGShopApp",
-    "version": "1.0.1",
+    "version": "1.0.2.1",
     "orientation": "portrait",
     "icon": "./assets/adaptive-icon.png",
     "userInterfaceStyle": "light",

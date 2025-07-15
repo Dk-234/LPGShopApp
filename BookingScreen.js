@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, Switch, useColorScheme } from 'react-native';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
-import { getCustomers, addBooking, addMultipleCylinders, removeCylinders } from './dataService';
+import { getCustomers, addBooking, addMultipleCylinders, removeCylinders, getCurrentUserPhone, getUserPricing, updateUserPricing } from './dataService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 
@@ -46,9 +46,9 @@ export default function BookingScreen({ route, navigation }) {
 
   // Price per cylinder type - loaded from Firebase
   const [CYLINDER_PRICES, setCYLINDER_PRICES] = useState({
-    '14.2kg': 1150,
-    '5kg': 450,
-    '19kg': 1350
+    '14.2kg': 850,
+    '5kg': 400,
+    '19kg': 1200
   });
 
   // Editable service fees
@@ -62,30 +62,27 @@ export default function BookingScreen({ route, navigation }) {
   // Service fees for calculations
   const SERVICE_FEES = serviceFees;
 
-  // Load prices and service fees from Firebase
+  // Load prices and service fees from Firebase (user-specific)
   const loadPrices = async () => {
     try {
-      const pricesDoc = await getDoc(doc(db, "settings", "prices"));
-      if (pricesDoc.exists()) {
-        setCYLINDER_PRICES(pricesDoc.data());
-      }
-      
-      // Load service fees
-      const serviceFeesDoc = await getDoc(doc(db, "settings", "serviceFees"));
-      if (serviceFeesDoc.exists()) {
-        setServiceFees(serviceFeesDoc.data());
-      } else {
-        // Set default service fees if not found
-        const defaultServiceFees = {
-          'No': 0,
-          'Pickup': 0,
-          'Drop': 0,
-          'Pickup + Drop': 0
-        };
-        setServiceFees(defaultServiceFees);
-      }
+      const userPhone = await getCurrentUserPhone();
+      const pricing = await getUserPricing(userPhone);
+      setCYLINDER_PRICES(pricing.cylinderPrices);
+      setServiceFees(pricing.serviceFees);
     } catch (error) {
-      console.error("Error loading prices:", error);
+      console.error("Error loading prices and fees:", error);
+      // Set default values if error
+      setCYLINDER_PRICES({
+        '5 kg': 400,
+        '14.2 kg': 850,
+        '19 kg': 1200
+      });
+      setServiceFees({
+        'No': 0,
+        'Pickup': 0,
+        'Drop': 0,
+        'Pickup + Drop': 0
+      });
     }
   };
 
@@ -129,7 +126,7 @@ export default function BookingScreen({ route, navigation }) {
   // Auto-calculate amount when payment status is "Paid"
   useEffect(() => {
     if (paymentStatus === 'Paid') {
-      const cylinderCost = cylinders * CYLINDER_PRICES[cylinderType];
+      const cylinderCost = cylinders * (CYLINDER_PRICES[cylinderType] || 0);
       const serviceFee = serviceFees[serviceType] || 0;
       const totalAmount = cylinderCost + serviceFee;
       setAmount(totalAmount.toString());
@@ -200,7 +197,8 @@ export default function BookingScreen({ route, navigation }) {
 
   const saveServiceFees = async () => {
     try {
-      await setDoc(doc(db, "settings", "serviceFees"), serviceFees);
+      const userPhone = await getCurrentUserPhone();
+      await updateUserPricing(userPhone, null, serviceFees); // Only update service fees
       alert("Service fees saved successfully!");
     } catch (error) {
       console.error("Error saving service fees:", error);
@@ -545,7 +543,7 @@ export default function BookingScreen({ route, navigation }) {
           <Text style={[styles.feeLabel, { color: colors.text }]}>Pickup Fee:</Text>
           <TextInput
             style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-            value={serviceFees.Pickup.toString()}
+            value={serviceFees.Pickup?.toString() || '0'}
             onChangeText={(text) => setServiceFees(prev => ({...prev, Pickup: parseInt(text) || 0}))}
             keyboardType="numeric"
             placeholder=""
@@ -556,7 +554,7 @@ export default function BookingScreen({ route, navigation }) {
           <Text style={[styles.feeLabel, { color: colors.text }]}>Drop Fee:</Text>
           <TextInput
             style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-            value={serviceFees.Drop.toString()}
+            value={serviceFees.Drop?.toString() || '0'}
             onChangeText={(text) => setServiceFees(prev => ({...prev, Drop: parseInt(text) || 0}))}
             keyboardType="numeric"
             placeholder=""
@@ -567,7 +565,7 @@ export default function BookingScreen({ route, navigation }) {
           <Text style={[styles.feeLabel, { color: colors.text }]}>Pickup + Drop:</Text>
           <TextInput
             style={[styles.feeInput, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder }]}
-            value={serviceFees['Pickup + Drop'].toString()}
+            value={serviceFees['Pickup + Drop']?.toString() || '0'}
             onChangeText={(text) => setServiceFees(prev => ({...prev, 'Pickup + Drop': parseInt(text) || 0}))}
             keyboardType="numeric"
             placeholder=""
@@ -700,12 +698,12 @@ const createStyles = (colors) => StyleSheet.create({
     fontWeight: 'normal',
   },
   serviceOptions: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  serviceButton: { padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 5 },
-  selectedService: { backgroundColor: '#e3f2fd', borderColor: '#2196f3' },
+  serviceButton: { padding: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 5 },
+  selectedService: { backgroundColor: colors.primary + '20', borderColor: colors.primary },
   customerSearchContainer: { marginBottom: 15 },
   customerListContainer: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: colors.border,
     borderTopWidth: 0,
     maxHeight: 200,
     backgroundColor: 'white',
@@ -822,20 +820,21 @@ const createStyles = (colors) => StyleSheet.create({
   // New styles for cylinder type picker and counter
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colors.border,
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: colors.inputBackground,
     marginBottom: 15,
   },
   picker: {
     height: 50,
+    color: colors.text,
   },
   counterContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 15,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     borderRadius: 10,
     padding: 15,
     borderWidth: 1,
@@ -868,18 +867,18 @@ const createStyles = (colors) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#007bff',
+    borderColor: colors.primary,
   },
   counterValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#007bff',
+    color: colors.primary,
   },
   disabledButton: {
-    backgroundColor: '#ccc',
+    backgroundColor: colors.border,
   },
   disabledButtonText: {
-    color: '#999',
+    color: colors.textSecondary,
   },
   checkboxContainer: {
     flexDirection: 'row',
@@ -887,14 +886,14 @@ const createStyles = (colors) => StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 15,
     padding: 15,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colors.border,
   },
   checkboxLabel: {
     fontSize: 16,
-    color: '#333',
+    color: colors.text,
     fontWeight: '500',
   },
   // Customer info card styles

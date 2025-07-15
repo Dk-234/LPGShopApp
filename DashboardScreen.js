@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, useColorScheme, Modal, TextInput, Alert } from 'react-native';
 import { collection, query, where, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
-import { getCurrentUserPhone } from './auth';
+import { getCurrentUserPhone, getUserPricing, updateUserPricing } from './dataService';
 
 // Color scheme utility for DashboardScreen
 const getColors = (isDark) => ({
@@ -64,24 +64,31 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
-  // Load prices from Firebase
+  // Load prices from Firebase (user-specific)
   const loadPrices = async () => {
     try {
-      const pricesDoc = await getDoc(doc(db, "settings", "prices"));
-      if (pricesDoc.exists()) {
-        const loadedPrices = pricesDoc.data();
-        setPrices(loadedPrices);
-        setTempPrices(loadedPrices);
-      }
+      const userPhone = await getCurrentUserPhone();
+      const pricing = await getUserPricing(userPhone);
+      setPrices(pricing.cylinderPrices);
+      setTempPrices(pricing.cylinderPrices);
     } catch (error) {
       console.error("Error loading prices:", error);
+      // Set default prices if error
+      const defaultPrices = {
+        '5 kg': 400,
+        '14.2 kg': 850,
+        '19 kg': 1200
+      };
+      setPrices(defaultPrices);
+      setTempPrices(defaultPrices);
     }
   };
 
-  // Save prices to Firebase
+  // Save prices to Firebase (user-specific)
   const savePrices = async () => {
     try {
-      await setDoc(doc(db, "settings", "prices"), tempPrices);
+      const userPhone = await getCurrentUserPhone();
+      await updateUserPricing(userPhone, tempPrices, null); // Only update cylinder prices
       setPrices(tempPrices);
       setPriceModalVisible(false);
       Alert.alert("Success", "Prices updated successfully!");
@@ -396,33 +403,33 @@ export default function DashboardScreen({ navigation }) {
             </View>
             
             <View style={styles.modalContent}>
-              <Text style={[styles.priceLabel, { color: colors.text }]}>14.2kg Cylinder Price:</Text>
+              <Text style={[styles.priceLabel, { color: colors.text }]}>5 kg Cylinder Price:</Text>
               <TextInput
                 style={[styles.priceInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                value={tempPrices['14.2kg'].toString()}
-                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '14.2kg': parseInt(text) || 0 }))}
+                value={tempPrices['5 kg']?.toString() || '0'}
+                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '5 kg': parseInt(text) || 0 }))}
                 keyboardType="numeric"
-                placeholder="Enter price"
+                placeholder="Enter 5kg price"
                 placeholderTextColor={colors.textSecondary}
               />
 
-              <Text style={[styles.priceLabel, { color: colors.text }]}>5kg Cylinder Price:</Text>
+              <Text style={[styles.priceLabel, { color: colors.text }]}>14.2 kg Cylinder Price:</Text>
               <TextInput
                 style={[styles.priceInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                value={tempPrices['5kg'].toString()}
-                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '5kg': parseInt(text) || 0 }))}
+                value={tempPrices['14.2 kg']?.toString() || '0'}
+                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '14.2 kg': parseInt(text) || 0 }))}
                 keyboardType="numeric"
-                placeholder="Enter price"
+                placeholder="Enter 14.2kg price"
                 placeholderTextColor={colors.textSecondary}
               />
 
-              <Text style={[styles.priceLabel, { color: colors.text }]}>19kg Cylinder Price:</Text>
+              <Text style={[styles.priceLabel, { color: colors.text }]}>19 kg Cylinder Price:</Text>
               <TextInput
                 style={[styles.priceInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                value={tempPrices['19kg'].toString()}
-                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '19kg': parseInt(text) || 0 }))}
+                value={tempPrices['19 kg']?.toString() || '0'}
+                onChangeText={(text) => setTempPrices(prev => ({ ...prev, '19 kg': parseInt(text) || 0 }))}
                 keyboardType="numeric"
-                placeholder="Enter price"
+                placeholder="Enter 19kg price"
                 placeholderTextColor={colors.textSecondary}
               />
 
@@ -656,5 +663,17 @@ const createStyles = (colors) => StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  brandSection: {
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  brandTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
   },
 });

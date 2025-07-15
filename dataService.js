@@ -383,12 +383,24 @@ export const createUser = async (phone, pin) => {
       throw new Error('User with this phone number already exists');
     }
     
-    // Create new user
+    // Create new user with default pricing
     return await addDoc(collection(db, 'users'), {
       phone,
       pin,
       createdAt: new Date(),
-      lastLogin: null
+      lastLogin: null,
+      // Default pricing settings
+      cylinderPrices: {
+        '5 kg': 400,
+        '14.2 kg': 850,
+        '19 kg': 1200
+      },
+      serviceFees: {
+        'No': 0,
+        'Pickup': 0,
+        'Drop': 0,
+        'Pickup + Drop': 0
+      }
     });
   } catch (error) {
     console.error('Error creating user:', error);
@@ -455,3 +467,75 @@ export const updateUserPin = async (phone, newPin) => {
     throw error;
   }
 };
+
+// Get user pricing settings
+export const getUserPricing = async (userPhone) => {
+  try {
+    const user = await getUserByPhone(userPhone);
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    const defaultCylinderPrices = {
+      '5 kg': 400,
+      '14.2 kg': 850,
+      '19 kg': 1200
+    };
+    
+    const defaultServiceFees = {
+      'No': 0,
+      'Pickup': 0,
+      'Drop': 0,
+      'Pickup + Drop': 0
+    };
+
+    // Get user prices or use defaults
+    const userCylinderPrices = user.cylinderPrices || defaultCylinderPrices;
+    
+    // Create a mapping that supports both formats (with and without spaces)
+    const cylinderPrices = {
+      // Format with spaces (new format)
+      '5 kg': userCylinderPrices['5 kg'] || userCylinderPrices['5kg'] || defaultCylinderPrices['5 kg'],
+      '14.2 kg': userCylinderPrices['14.2 kg'] || userCylinderPrices['14.2kg'] || defaultCylinderPrices['14.2 kg'],
+      '19 kg': userCylinderPrices['19 kg'] || userCylinderPrices['19kg'] || defaultCylinderPrices['19 kg'],
+      // Format without spaces (legacy format)
+      '5kg': userCylinderPrices['5 kg'] || userCylinderPrices['5kg'] || defaultCylinderPrices['5 kg'],
+      '14.2kg': userCylinderPrices['14.2 kg'] || userCylinderPrices['14.2kg'] || defaultCylinderPrices['14.2 kg'],
+      '19kg': userCylinderPrices['19 kg'] || userCylinderPrices['19kg'] || defaultCylinderPrices['19 kg']
+    };
+    
+    return {
+      cylinderPrices,
+      serviceFees: user.serviceFees || defaultServiceFees
+    };
+  } catch (error) {
+    console.error('Error getting user pricing:', error);
+    throw error;
+  }
+};
+
+// Update user pricing settings
+export const updateUserPricing = async (userPhone, cylinderPrices, serviceFees) => {
+  try {
+    const user = await getUserByPhone(userPhone);
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    const updateData = {};
+    if (cylinderPrices) {
+      updateData.cylinderPrices = cylinderPrices;
+    }
+    if (serviceFees) {
+      updateData.serviceFees = serviceFees;
+    }
+    
+    await updateDoc(doc(db, 'users', user.id), updateData);
+  } catch (error) {
+    console.error('Error updating user pricing:', error);
+    throw error;
+  }
+};
+
+// Re-export getCurrentUserPhone for convenience
+export { getCurrentUserPhone } from './auth';

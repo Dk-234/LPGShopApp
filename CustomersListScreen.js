@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, ScrollView, useColorScheme, TextInput, Alert } from 'react-native';
-import { getCustomers, deleteCustomer } from './dataService';
+import { getCustomers, deleteCustomer as deleteCustomerFromDB } from './dataService';
 
 // Color scheme utility
 const getColors = (isDark) => ({
@@ -81,7 +81,7 @@ export default function CustomersListScreen({ navigation, route }) {
   const filteredCustomers = getFilteredCustomers();
 
   // Delete customer function
-  const deleteCustomer = async (customerId, customerName) => {
+  const handleDeleteCustomer = async (customerId, customerName) => {
     Alert.alert(
       'Delete Customer',
       `Are you sure you want to delete "${customerName}"? This action cannot be undone.`,
@@ -95,7 +95,7 @@ export default function CustomersListScreen({ navigation, route }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteCustomer(customerId);
+              await deleteCustomerFromDB(customerId);
               Alert.alert('Success', 'Customer deleted successfully');
               // Reload customers after deletion
               const customersList = await getCustomers();
@@ -147,13 +147,13 @@ export default function CustomersListScreen({ navigation, route }) {
         setSelectedCustomer(item);
         setModalVisible(true);
       }}
-      onLongPress={() => deleteCustomer(item.id, item.name)}
+      onLongPress={() => handleDeleteCustomer(item.id, item.name)}
     >
       <View style={styles.itemHeader}>
         <Text style={styles.name}>{item.name}</Text>
         <TouchableOpacity 
           style={styles.deleteButton}
-          onPress={() => deleteCustomer(item.id, item.name)}
+          onPress={() => handleDeleteCustomer(item.id, item.name)}
         >
           <Text style={styles.deleteButtonText}>🗑️</Text>
         </TouchableOpacity>
